@@ -19,12 +19,19 @@ const state = {
   latestRetrievalMetrics: null,
   latestCompareReport: null,
   latestBenchmarkMetrics: null,
+  latestGenerationMetrics: null,
   activeTrace: [],
   statusTimer: null,
   requestStartedAt: null,
   railOpen: false,
-  activeEvalAction: "runRetrievalEval",
+  activeEvalAction: null,
   streamingAnswer: "",
+};
+
+const evalConfig = {
+  topK: 3,
+  candidateK: 12,
+  strategy: "hybrid_rerank",
 };
 
 marked.setOptions({
@@ -85,7 +92,7 @@ app.innerHTML = `
         <div class="stack">
           <input id="knowledgeFile" type="file" />
           <button id="uploadKnowledge">上传并入库</button>
-          <pre id="uploadResult" class="result-box compact-result"></pre>
+          <pre id="uploadResult" class="result-box compact-result">等待上传文件，这里会显示入库结果、切块数量和来源信息。</pre>
         </div>
       </section>
     </aside>
@@ -156,25 +163,6 @@ app.innerHTML = `
             <p class="eyebrow">Evaluation</p>
             <h3>评估与 Benchmark</h3>
           </div>
-          <div class="inline compact">
-            <label class="field slim">
-              <span>Top K</span>
-              <input id="topK" type="number" min="1" max="20" value="3" />
-            </label>
-            <label class="field slim">
-              <span>Candidate K</span>
-              <input id="candidateK" type="number" min="1" max="100" value="12" />
-            </label>
-            <label class="field slim">
-              <span>Strategy</span>
-              <select id="strategy">
-                <option value="hybrid_rerank">hybrid_rerank</option>
-                <option value="dense_only">dense_only</option>
-                <option value="dense_rerank">dense_rerank</option>
-                <option value="hybrid_only">hybrid_only</option>
-              </select>
-            </label>
-          </div>
         </div>
 
         <div class="inline wrap">
@@ -195,7 +183,7 @@ app.innerHTML = `
             </div>
           </div>
           <div id="metricCards" class="metric-grid"></div>
-          <pre id="retrievalEvalResult" class="result-box large"></pre>
+          <pre id="retrievalEvalResult" class="result-box large">等待运行 Retrieval Eval，这里会显示检索指标和原始结果。</pre>
         </section>
 
         <section id="comparePanel" class="dashboard-card eval-panel hidden">
@@ -206,7 +194,7 @@ app.innerHTML = `
             </div>
           </div>
           <div id="compareChart" class="chart-panel empty-state">运行 Baseline Compare 后显示</div>
-          <pre id="compareResult" class="result-box large"></pre>
+          <pre id="compareResult" class="result-box large">等待运行 Baseline Compare，这里会显示不同检索策略的对比结果。</pre>
         </section>
 
         <section id="generationEvalPanel" class="dashboard-card eval-panel hidden">
@@ -216,7 +204,8 @@ app.innerHTML = `
               <h4>Generation Eval</h4>
             </div>
           </div>
-          <pre id="generationEvalResult" class="result-box large"></pre>
+          <div id="generationMetricCards" class="metric-grid"></div>
+          <pre id="generationEvalResult" class="result-box large">等待运行 Generation Eval，这里会显示生成质量指标和评估详情。</pre>
         </section>
 
         <section id="benchmarkPanel" class="dashboard-card eval-panel hidden">
@@ -228,7 +217,7 @@ app.innerHTML = `
           </div>
           <div id="benchmarkHighlights" class="hero-metrics hero-metrics-1"></div>
           <div id="benchmarkChart" class="chart-panel empty-state">运行 System Benchmark 后显示</div>
-          <pre id="benchmarkResult" class="result-box large"></pre>
+          <pre id="benchmarkResult" class="result-box large">等待运行 System Benchmark，这里会显示端到端时延和基准明细。</pre>
         </section>
 
         <section id="testingPanel" class="dashboard-card eval-panel hidden">
@@ -254,7 +243,7 @@ app.innerHTML = `
           <div class="inline wrap">
             <button id="rebuildEnv">重建环境</button>
           </div>
-          <pre id="rebuildResult" class="result-box large"></pre>
+          <pre id="rebuildResult" class="result-box large">等待执行测试环境重建，这里会显示下载、清洗、入库和评估结果。</pre>
         </section>
       </section>
     </main>
@@ -463,19 +452,43 @@ function renderSummaryCards() {
 function renderMetricCards() {
   const container = $("#metricCards");
   const retrieval = state.latestRetrievalMetrics;
-  const benchmark = state.latestBenchmarkMetrics;
   const cards = [
     ["Precision@K", retrieval?.avg_precision_at_k, 4],
     ["Recall@K", retrieval?.avg_recall_at_k, 4],
     ["MRR", retrieval?.mrr, 4],
     ["nDCG@K", retrieval?.ndcg_at_k, 4],
     ["Avg Query Latency", retrieval ? `${formatNumber(retrieval.avg_query_latency_ms, 2)} ms` : null, null],
-    ["Complex Latency", benchmark ? `${formatNumber(benchmark.complex_request_latency_ms, 2)} ms` : null, null],
+    ["P95 Query Latency", retrieval ? `${formatNumber(retrieval.p95_query_latency_ms, 2)} ms` : null, null],
   ];
 
   container.innerHTML = cards
     .map(([label, value, digits]) => {
       const text = typeof value === "string" ? value : value == null ? "待运行" : formatNumber(value, digits || 4);
+      return `
+        <div class="stat-card">
+          <span>${label}</span>
+          <strong>${text}</strong>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderGenerationMetricCards() {
+  const container = $("#generationMetricCards");
+  const metrics = state.latestGenerationMetrics;
+  const cards = [
+    ["Answer Relevance", metrics?.avg_answer_relevance, 4],
+    ["Faithfulness", metrics?.avg_faithfulness, 4],
+    ["Citation Accuracy", metrics?.avg_citation_accuracy, 4],
+    ["Keyword Coverage", metrics?.avg_keyword_coverage, 4],
+    ["Dataset Size", metrics?.dataset_size, 0],
+  ];
+
+  container.innerHTML = cards
+    .map(([label, value, digits]) => {
+      const text =
+        value == null ? "待运行" : digits === 0 ? String(value) : formatNumber(value, digits || 4);
       return `
         <div class="stat-card">
           <span>${label}</span>
@@ -554,6 +567,7 @@ function renderBenchmarkChart() {
 function syncDashboard() {
   renderSummaryCards();
   renderMetricCards();
+  renderGenerationMetricCards();
   renderCompareChart();
   renderBenchmarkChart();
 }
@@ -733,15 +747,19 @@ $("#rebuildEnv").addEventListener("click", async () => {
 $("#runRetrievalEval").addEventListener("click", async () => {
   const resultBox = $("#retrievalEvalResult");
   setActiveEvalAction("runRetrievalEval");
+  if (state.latestRetrievalMetrics) {
+    $("#evalStatus").textContent = "当前显示已缓存的 Retrieval Eval 结果。";
+    return;
+  }
   $("#evalStatus").textContent = "正在运行 Retrieval Eval...";
   resultBox.textContent = "正在运行 retrieval eval...";
   try {
     const payload = await requestJson("/eval/retrieval", {
       method: "POST",
       body: JSON.stringify({
-        top_k: Number($("#topK").value),
-        candidate_k: Number($("#candidateK").value),
-        strategy: $("#strategy").value,
+        top_k: evalConfig.topK,
+        candidate_k: evalConfig.candidateK,
+        strategy: evalConfig.strategy,
       }),
     });
     prettyPrint(resultBox, payload);
@@ -757,20 +775,24 @@ $("#runRetrievalEval").addEventListener("click", async () => {
 $("#runCompare").addEventListener("click", async () => {
   const resultBox = $("#compareResult");
   setActiveEvalAction("runCompare");
+  if (state.latestCompareReport) {
+    $("#evalStatus").textContent = "当前显示已缓存的 Baseline Compare 结果。";
+    return;
+  }
   $("#evalStatus").textContent = "正在运行 Baseline Compare...";
   resultBox.textContent = "正在运行 baseline compare...";
   try {
     const payload = await requestJson("/eval/retrieval/compare", {
       method: "POST",
       body: JSON.stringify({
-        top_k: Number($("#topK").value),
-        candidate_k: Number($("#candidateK").value),
-        strategy: $("#strategy").value,
+        top_k: evalConfig.topK,
+        candidate_k: evalConfig.candidateK,
+        strategy: evalConfig.strategy,
       }),
     });
     prettyPrint(resultBox, payload);
     state.latestCompareReport = payload.report;
-    const best = payload.report?.baselines?.find((item) => item.strategy === $("#strategy").value) ||
+    const best = payload.report?.baselines?.find((item) => item.strategy === evalConfig.strategy) ||
       payload.report?.baselines?.[payload.report?.baselines?.length - 1];
     if (best) {
       state.latestRetrievalMetrics = best;
@@ -786,16 +808,22 @@ $("#runCompare").addEventListener("click", async () => {
 $("#runGenerationEval").addEventListener("click", async () => {
   const resultBox = $("#generationEvalResult");
   setActiveEvalAction("runGenerationEval");
+  if (state.latestGenerationMetrics) {
+    $("#evalStatus").textContent = "当前显示已缓存的 Generation Eval 结果。";
+    return;
+  }
   $("#evalStatus").textContent = "正在运行 Generation Eval...";
   resultBox.textContent = "正在运行 generation eval...";
   try {
     const payload = await requestJson("/eval/generation", {
       method: "POST",
       body: JSON.stringify({
-        candidate_k: Number($("#candidateK").value),
+        candidate_k: evalConfig.candidateK,
       }),
     });
     prettyPrint(resultBox, payload);
+    state.latestGenerationMetrics = payload.metrics;
+    syncDashboard();
     $("#evalStatus").textContent = "Generation Eval 运行完成。";
   } catch (error) {
     resultBox.textContent = `generation eval 失败：${error.message}`;
@@ -806,13 +834,17 @@ $("#runGenerationEval").addEventListener("click", async () => {
 $("#runBenchmark").addEventListener("click", async () => {
   const resultBox = $("#benchmarkResult");
   setActiveEvalAction("runBenchmark");
+  if (state.latestBenchmarkMetrics) {
+    $("#evalStatus").textContent = "当前显示已缓存的 System Benchmark 结果。";
+    return;
+  }
   $("#evalStatus").textContent = "正在运行 System Benchmark...";
   resultBox.textContent = "正在运行 system benchmark...";
   try {
     const payload = await requestJson("/eval/benchmark", {
       method: "POST",
       body: JSON.stringify({
-        candidate_k: Number($("#candidateK").value),
+        candidate_k: evalConfig.candidateK,
       }),
     });
     prettyPrint(resultBox, payload);

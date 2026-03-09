@@ -574,6 +574,10 @@ textarea {
   max-height: 320px;
 }
 
+#generationMetricCards:empty {
+  display: none;
+}
+
 .dashboard-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
