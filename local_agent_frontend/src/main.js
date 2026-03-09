@@ -187,14 +187,13 @@ app.innerHTML = `
 
         <div id="evalStatus" class="live-status eval-status">选择一个评估功能后开始运行。</div>
 
-        <section id="retrievalEvalPanel" class="dashboard-card eval-panel">
+        <section id="retrievalEvalPanel" class="dashboard-card eval-panel hidden">
           <div class="chart-head">
             <div>
               <p class="eyebrow">Metrics</p>
               <h4>Retrieval Eval</h4>
             </div>
           </div>
-          <div id="retrievalHighlights" class="hero-metrics hero-metrics-2"></div>
           <div id="metricCards" class="metric-grid"></div>
           <pre id="retrievalEvalResult" class="result-box large"></pre>
         </section>
@@ -291,7 +290,9 @@ function setActiveEvalAction(buttonId) {
   Object.values(panelMap).forEach((panelId) => {
     $("#" + panelId)?.classList.add("hidden");
   });
-  $("#" + panelMap[buttonId])?.classList.remove("hidden");
+  if (buttonId && panelMap[buttonId]) {
+    $("#" + panelMap[buttonId])?.classList.remove("hidden");
+  }
 }
 
 function formatNumber(value, digits = 4) {
@@ -436,23 +437,8 @@ function startStatusTicker() {
 }
 
 function renderSummaryCards() {
-  const retrievalCards = $("#retrievalHighlights");
   const benchmarkCards = $("#benchmarkHighlights");
-  const retrieval = state.latestRetrievalMetrics;
   const benchmark = state.latestBenchmarkMetrics;
-
-  const retrievalHighlights = [
-    {
-      label: "最近 Recall@K",
-      value: retrieval ? formatNumber(retrieval.avg_recall_at_k, 4) : "待运行",
-      tone: "warm",
-    },
-    {
-      label: "最近 MRR",
-      value: retrieval ? formatNumber(retrieval.mrr, 4) : "待运行",
-      tone: "teal",
-    },
-  ];
 
   const benchmarkHighlights = [
     {
@@ -461,17 +447,6 @@ function renderSummaryCards() {
       tone: "dark",
     },
   ];
-
-  retrievalCards.innerHTML = retrievalHighlights
-    .map(
-      (card) => `
-        <div class="metric metric-${card.tone}">
-          <span>${card.label}</span>
-          <strong>${card.value}</strong>
-        </div>
-      `
-    )
-    .join("");
 
   benchmarkCards.innerHTML = benchmarkHighlights
     .map(
@@ -858,4 +833,4 @@ $("#showTestingPanel").addEventListener("click", () => {
 renderMessages();
 syncDashboard();
 setRailOpen(false);
-setActiveEvalAction("runRetrievalEval");
+setActiveEvalAction(null);
