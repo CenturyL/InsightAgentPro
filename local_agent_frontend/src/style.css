@@ -679,6 +679,10 @@ ul {
   min-height: 50px;
   padding: 0 18px;
   border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 243, 0.82);
+  color: var(--text);
+  box-shadow: none;
   cursor: pointer;
   user-select: none;
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, color 160ms ease;
@@ -695,6 +699,13 @@ ul {
   line-height: 1;
   color: inherit;
   white-space: nowrap;
+}
+
+.toggle-chip.is-active {
+  background: linear-gradient(135deg, var(--accent), #f3a34a);
+  color: #fffaf1;
+  border-color: transparent;
+  box-shadow: var(--shadow);
 }
 
 .testing-shortcut {
