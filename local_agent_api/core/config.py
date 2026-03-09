@@ -24,10 +24,12 @@ class Settings(BaseSettings):
     VECTOR_STORE_PATH: str = str(_PROJECT_ROOT / "data" / "chroma_db")
     # 这里选择一个在 Mac 本地跑得快、且对中文友好的轻量级开源 Embedding 模型
     EMBEDDING_MODEL: str = "shibing624/text2vec-base-chinese" 
+    EMBEDDING_DEVICE: str = "auto"
     
     # 【工业级新增】本地重排 (Reranker) 模型
     # BAAI (智源研究院) 的 bge-reranker 目前是开源中最顶尖的中文重排模型之一
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    RERANKER_DEVICE: str = "auto"
 
     # ── 长期记忆 & 持久化 Checkpointer（可选）────────────────────────────────
     # 格式：postgresql://用户名:密码@主机:端口/数据库名

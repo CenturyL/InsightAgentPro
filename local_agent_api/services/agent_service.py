@@ -73,7 +73,7 @@ def _should_use_advanced_model_for_simple_path(query: str, message_count: int = 
         ]
     )
 
-
+# 返回create_agent()
 def _build_agent(checkpointer):
     """根据已初始化的 checkpointer 构建 Agent 单例。"""
     return create_agent(
@@ -94,7 +94,7 @@ def _build_agent(checkpointer):
         ),
     )
 
-
+# 决定是内存还是数据库
 async def initialize() -> None:
     """
     FastAPI lifespan 调用，初始化 Agent 及 Checkpointer。
@@ -131,7 +131,7 @@ async def initialize() -> None:
     _agent = _build_agent(_checkpointer)
     print("✅ [Agent] 初始化完成")
 
-
+# Fastapi结束进程时清理
 async def cleanup() -> None:
     """FastAPI lifespan 退出时关闭连接池。"""
     global _connection_pool
@@ -139,7 +139,7 @@ async def cleanup() -> None:
         await _connection_pool.close()
         print("🔒 [Agent] 数据库连接池已关闭")
 
-
+# 兜底用，正常情况下FastAPI await initialize() 已经实例化过了
 def _get_agent():
     """同步获取 Agent 单例，若未初始化则使用 MemorySaver 兜底（开发便利）。"""
     global _agent, _checkpointer
@@ -287,7 +287,7 @@ async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
         print(f"⚠️ [长期记忆] 记忆提取失败（{e}），跳过")
 
 
-# ── 流式对话入口 ─────────────────────────────────────────────────────────────
+# ── 流式对话入口 ， router执行这里 ───────────────────────────────────────────────────────
 async def get_agent_stream(
     query: str,
     thread_id: str = "default",

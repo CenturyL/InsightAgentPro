@@ -23,6 +23,8 @@ const state = {
   statusTimer: null,
   requestStartedAt: null,
   activeQuestion: "",
+  railOpen: false,
+  activeEvalAction: "",
 };
 
 marked.setOptions({
@@ -41,6 +43,7 @@ app.innerHTML = `
           <p class="eyebrow">Policy And Tender Agent</p>
           <h1>InsightAgent</h1>
         </div>
+        <button id="closeRail" class="ghost rail-close">关闭</button>
       </div>
 
       <div class="stack">
@@ -83,14 +86,17 @@ app.innerHTML = `
             <h3>测试环境重建</h3>
           </div>
         </div>
+        <p class="helper-text">
+          用于一键重新下载测试语料、清洗、入库并重建评估集，适合在新环境或测试数据被改乱后快速恢复。
+        </p>
         <div class="compact-actions">
           <label class="check">
             <input id="forceDownload" type="checkbox" />
-            <span>强制下载</span>
+            <span>强制下载：忽略本地缓存，重新抓取测试文档</span>
           </label>
           <label class="check">
             <input id="runRetrievalEvalAfterRebuild" type="checkbox" checked />
-            <span>自动评估</span>
+            <span>自动评估：重建完成后顺手跑一次 retrieval eval</span>
           </label>
         </div>
         <button id="rebuildEnv">重建环境</button>
@@ -113,6 +119,9 @@ app.innerHTML = `
     </aside>
 
     <main class="workspace">
+      <div class="mobile-toolbar">
+        <button id="openRail" class="ghost">菜单</button>
+      </div>
       <header class="workspace-header">
         <div>
           <p class="eyebrow">Agent Console</p>
@@ -216,7 +225,7 @@ app.innerHTML = `
         </div>
 
         <div class="inline wrap">
-          <button id="runRetrievalEval">Retrieval Eval</button>
+          <button id="runRetrievalEval" class="ghost">Retrieval Eval</button>
           <button id="runCompare" class="ghost">Baseline Compare</button>
           <button id="runGenerationEval" class="ghost">Generation Eval</button>
           <button id="runBenchmark" class="ghost">System Benchmark</button>
@@ -264,6 +273,21 @@ const $ = (selector) => document.querySelector(selector);
 
 const apiBaseInput = $("#apiBase");
 const threadInput = $("#threadId");
+
+function setRailOpen(open) {
+  state.railOpen = open;
+  document.body.dataset.railOpen = open ? "true" : "false";
+}
+
+function setActiveEvalAction(buttonId) {
+  const ids = ["runRetrievalEval", "runCompare", "runGenerationEval", "runBenchmark"];
+  state.activeEvalAction = buttonId;
+  ids.forEach((id) => {
+    const button = $("#" + id);
+    if (!button) return;
+    button.classList.toggle("is-active", id === buttonId);
+  });
+}
 
 function formatNumber(value, digits = 4) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
@@ -660,6 +684,8 @@ async function submitChat() {
 }
 
 $("#sendChat").addEventListener("click", submitChat);
+$("#openRail").addEventListener("click", () => setRailOpen(!state.railOpen));
+$("#closeRail").addEventListener("click", () => setRailOpen(false));
 
 $("#query").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -714,6 +740,7 @@ $("#rebuildEnv").addEventListener("click", async () => {
 
 $("#runRetrievalEval").addEventListener("click", async () => {
   const resultBox = $("#evalResult");
+  setActiveEvalAction("runRetrievalEval");
   resultBox.textContent = "正在运行 retrieval eval...";
   try {
     const payload = await requestJson("/eval/retrieval", {
@@ -734,6 +761,7 @@ $("#runRetrievalEval").addEventListener("click", async () => {
 
 $("#runCompare").addEventListener("click", async () => {
   const resultBox = $("#evalResult");
+  setActiveEvalAction("runCompare");
   resultBox.textContent = "正在运行 baseline compare...";
   try {
     const payload = await requestJson("/eval/retrieval/compare", {
@@ -759,6 +787,7 @@ $("#runCompare").addEventListener("click", async () => {
 
 $("#runGenerationEval").addEventListener("click", async () => {
   const resultBox = $("#evalResult");
+  setActiveEvalAction("runGenerationEval");
   resultBox.textContent = "正在运行 generation eval...";
   try {
     const payload = await requestJson("/eval/generation", {
@@ -775,6 +804,7 @@ $("#runGenerationEval").addEventListener("click", async () => {
 
 $("#runBenchmark").addEventListener("click", async () => {
   const resultBox = $("#evalResult");
+  setActiveEvalAction("runBenchmark");
   resultBox.textContent = "正在运行 system benchmark...";
   try {
     const payload = await requestJson("/eval/benchmark", {
@@ -793,3 +823,4 @@ $("#runBenchmark").addEventListener("click", async () => {
 
 renderMessages();
 syncDashboard();
+setRailOpen(false);

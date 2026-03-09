@@ -56,6 +56,10 @@ select {
   gap: 24px;
 }
 
+.mobile-toolbar {
+  display: none;
+}
+
 .workspace-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 560px);
@@ -68,6 +72,11 @@ select {
   gap: 16px;
   align-items: center;
   margin-bottom: 28px;
+}
+
+.rail-close {
+  display: none;
+  margin-left: auto;
 }
 
 .brand-mark {
@@ -177,6 +186,12 @@ h5 {
 
 .compact-panel {
   gap: 12px;
+}
+
+.helper-text {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 .compact-actions {
@@ -688,6 +703,13 @@ button.ghost {
   box-shadow: none;
 }
 
+button.is-active {
+  background: linear-gradient(135deg, var(--accent), #f3a34a);
+  color: #fffaf1;
+  border-color: transparent;
+  box-shadow: var(--shadow);
+}
+
 @media (max-width: 1200px) {
   .workbench-grid,
   .dashboard-grid,
@@ -710,10 +732,32 @@ button.ghost {
   .rail {
     border-right: none;
     border-bottom: 1px solid var(--line);
+    order: 2;
+  }
+
+  .workspace {
+    order: 1;
   }
 }
 
 @media (max-width: 640px) {
+  body[data-rail-open="false"] .rail {
+    display: none;
+  }
+
+  body[data-rail-open="true"] .workspace {
+    display: none;
+  }
+
+  .mobile-toolbar {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .rail-close {
+    display: inline-flex;
+  }
+
   .workspace,
   .rail {
     padding: 18px;
