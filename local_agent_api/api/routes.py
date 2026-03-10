@@ -159,12 +159,19 @@ async def upload_knowledge(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        # 2. 调用存库逻辑 (之前写好的)
-        chunks_count = process_and_store_document(temp_file_path)
+        # 2. 调用存库逻辑，并保留原始上传文件名作为知识库 source
+        chunks_count = process_and_store_document(
+            temp_file_path,
+            metadata_overrides={
+                "source": file.filename,
+                "upload_name": file.filename,
+            },
+        )
         return {
             "code": 200,
             "message": "录入成功！",
             "filename": file.filename,
+            "source": file.filename,
             "chunks_inserted": chunks_count
         }
     except Exception as e:

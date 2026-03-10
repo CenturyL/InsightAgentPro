@@ -32,6 +32,10 @@ from local_agent_api.core.middleware import (
     handle_tool_errors,
 )
 from local_agent_api.services.tools import AGENT_TOOLS
+from local_agent_api.services.tool_context import (
+    reset_tool_metadata_filters,
+    set_tool_metadata_filters,
+)
 
 
 # ── AgentState：含 user_id 字段，中间件通过 request.state 读取 ───────────────
@@ -45,7 +49,7 @@ _agent = None
 _checkpointer = None
 _connection_pool = None  # AsyncPostgresSaver 依赖的连接池
 
-
+# 在简单模式下，用本地模型还是高级模型
 def _should_use_advanced_model_for_simple_path(query: str, message_count: int = 1) -> bool:
     """与 simple agent 路径的动态路由保持一致，用于向前端标注本轮回答的模型来源。"""
     if message_count > 2:
@@ -172,7 +176,7 @@ def _truncate(text: str, limit: int = 120) -> str:
     clean = " ".join(text.split())
     return clean if len(clean) <= limit else clean[:limit] + "..."
 
-
+# 合成答案，固定advanced
 async def _stream_synthesizer(state: OrchestratorState) -> AsyncGenerator[str, None]:
     prompt = build_synthesizer_prompt(state)
     yield "✍️ [答案生成] 正在组织最终答案...\n\n"
@@ -200,6 +204,7 @@ async def _run_plan_and_execute_stream(
     task_mode: str | None = None,
     metadata_filters: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
+    # 先构造 OrchestratorState
     state: OrchestratorState = {
         "messages": [HumanMessage(content=query)],
         "user_id": user_id,
@@ -208,7 +213,7 @@ async def _run_plan_and_execute_stream(
         "metadata_filters": metadata_filters or {},
         "is_complex": True,
     }
-
+    # planner：生成plan流给前端(固定advanced)，结果写回 state["plan"]
     yield "> 模型来源：DeepSeek API\n\n"
     yield "📝 [任务规划] 正在生成执行计划...\n"
     state = await planner_node(state)
@@ -216,7 +221,7 @@ async def _run_plan_and_execute_stream(
     if plan:
         plan_lines = "\n".join(f"- {step['step_id']}: {step['goal']}" for step in plan)
         yield f"✅ [任务规划] 已生成 {len(plan)} 个步骤：\n{plan_lines}\n\n"
-
+    # executor：遍历step_results流给前段，按plan执行，结果写进step_results
     yield "🔎 [步骤执行] 正在逐步检索和执行任务...\n"
     state = await executor_node(state)
     for result in state.get("step_results", []):
@@ -225,7 +230,7 @@ async def _run_plan_and_execute_stream(
             f"{_truncate(result['evidence'])}\n"
         )
     yield "\n"
-
+    # reflection：整理成答案，advanced_model.astream(prompt) 把最终答案流式输出
     reflection_before = state.get("step_results", [])
     state = await reflection_node(state)
     reflection_after = state.get("step_results", [])
@@ -238,7 +243,7 @@ async def _run_plan_and_execute_stream(
                     f"{_truncate(result['evidence'])}\n"
                 )
         yield "\n"
-
+    # synthesizer（固定advanced）
     async for chunk in _stream_synthesizer(state):
         yield chunk
 
@@ -287,7 +292,7 @@ async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
         print(f"⚠️ [长期记忆] 记忆提取失败（{e}），跳过")
 
 
-# ── 流式对话入口 ， router执行这里 ───────────────────────────────────────────────────────
+# ── 流式对话入口 ， router把post转发到执行这里 ───────────────────────────────────────────────────────
 async def get_agent_stream(
     query: str,
     thread_id: str = "default",
@@ -302,58 +307,66 @@ async def get_agent_stream(
     user_id  ：用户唯一标识，用于隔离长期记忆（pgvector）
     """
     agent = _get_agent()
+    tool_context_token = set_tool_metadata_filters(metadata_filters)
 
     # user_id 随 state 输入，inject_long_term_memory 中间件会通过 request.state 读取
     inputs: AgentState = {
         "messages": [HumanMessage(content=query)],
         "user_id": user_id,
     }
+    # thread_id 进 configurable，给 checkpointer 用
     config = {"configurable": {"thread_id": thread_id}}
-
+    
+    # 复杂度判断，走哪个模式
     should_plan, planning_reason = is_complex_query(query)
-    if task_mode in {"compare", "extract", "report"}:
+    if task_mode in {"compare", "extract", "report"}: # 若前段传入时强指定
         should_plan = True
         planning_reason = f"task_mode={task_mode}"
-    if should_plan:
-        yield f"🧭 [任务路由] 检测到复杂任务，进入 Plan-and-Execute 模式。原因：{planning_reason}\n\n"
-        async for chunk in _run_plan_and_execute_stream(
-            query,
-            thread_id,
-            user_id,
-            task_mode=task_mode,
-            metadata_filters=metadata_filters,
-        ):
-            yield chunk
-        if user_id:
+    try:
+        if should_plan:
+            # 复杂模式
+            yield f"🧭 [任务路由] 检测到复杂任务，进入 Plan-and-Execute 模式。原因：{planning_reason}\n\n"
+            async for chunk in _run_plan_and_execute_stream(
+                query,
+                thread_id,
+                user_id,
+                task_mode=task_mode,
+                metadata_filters=metadata_filters,
+            ):
+                yield chunk
+            if user_id:
+                # 有userid就调用长期记忆
+                asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
+            return
+        # 简单模式 判断模型
+        simple_model_label = (
+            "DeepSeek API"
+            if _should_use_advanced_model_for_simple_path(query, message_count=1)
+            else "本地 Qwen（Ollama）"
+        )
+        yield f"> 模型来源：{simple_model_label}\n\n"
+
+        stream_had_content = False
+        # 简单模式 流式主循环，读 LangChain 事件流
+        async for event in agent.astream_events(inputs, config=config, version="v2"):
+            kind = event["event"]
+
+            if kind == "on_chat_model_stream":
+                chunk_content = event["data"]["chunk"].content
+                if chunk_content:
+                    stream_had_content = True
+                    yield chunk_content
+
+            elif kind == "on_tool_start":
+                tool_name = event["name"]
+                yield f"\n\n🛠️ [Agent思考] 决定调用工具：【{tool_name}】...\n"
+
+            elif kind == "on_tool_end":
+                tool_name = event["name"]
+                yield f"\n✅ [Agent执行] 工具【{tool_name}】返回了结果，正在整理答案...\n\n"
+
+        # 流结束后，异步后台提取存入记忆（不阻塞响应）
+        if stream_had_content and user_id:
             asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
-        return
-
-    simple_model_label = (
-        "DeepSeek API"
-        if _should_use_advanced_model_for_simple_path(query, message_count=1)
-        else "本地 Qwen（Ollama）"
-    )
-    yield f"> 模型来源：{simple_model_label}\n\n"
-
-    stream_had_content = False
-
-    async for event in agent.astream_events(inputs, config=config, version="v2"):
-        kind = event["event"]
-
-        if kind == "on_chat_model_stream":
-            chunk_content = event["data"]["chunk"].content
-            if chunk_content:
-                stream_had_content = True
-                yield chunk_content
-
-        elif kind == "on_tool_start":
-            tool_name = event["name"]
-            yield f"\n\n🛠️ [Agent思考] 决定调用工具：【{tool_name}】...\n"
-
-        elif kind == "on_tool_end":
-            tool_name = event["name"]
-            yield f"\n✅ [Agent执行] 工具【{tool_name}】返回了结果，正在整理答案...\n\n"
-
-    # 流结束后，异步后台提取记忆（不阻塞响应）
-    if stream_had_content and user_id:
-        asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
+    finally:
+        reset_tool_metadata_filters(tool_context_token)

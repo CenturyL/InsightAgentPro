@@ -16,6 +16,7 @@ const state = {
   apiBase: localStorage.getItem("agent-api-base") || "/api/v1",
   threadId: localStorage.getItem("agent-thread-id") || defaultThreadId,
   messages: [],
+  latestUploadedSource: null,
   latestRetrievalMetrics: null,
   latestCompareReport: null,
   latestBenchmarkMetrics: null,
@@ -91,7 +92,7 @@ app.innerHTML = `
         </div>
         <div class="stack">
           <input id="knowledgeFile" type="file" accept=".txt,.md,.pdf,.html,.htm,.csv,.tsv,.png,.jpg,.jpeg,.webp" />
-          <p class="helper-text">支持上传：TXT、MD、PDF、HTML、CSV/TSV、PNG/JPG/JPEG/WEBP。图片会走 OCR 提取文本后入库。</p>
+          <p class="helper-text">支持上传：TXT、MD、PDF、HTML、CSV/TSV、PNG/JPG/JPEG/WEBP。图片会走 OCR 提取文本后入库；上传后的文件会在当前会话中优先参与检索。</p>
           <button id="uploadKnowledge">上传并入库</button>
           <pre id="uploadResult" class="result-box compact-result">等待上传文件，这里会显示入库结果、切块数量和来源信息。</pre>
         </div>
@@ -411,6 +412,7 @@ function renderTrace(traceLines) {
       `
     )
     .join("");
+  container.scrollTop = container.scrollHeight;
 }
 
 function stopStatusTicker() {
@@ -666,7 +668,13 @@ async function submitChat() {
   queryInput.value = "";
 
   try {
-    const metadataFilters = parseOptionalJson($("#metadataFilters").value);
+    let metadataFilters = parseOptionalJson($("#metadataFilters").value);
+    if (state.latestUploadedSource && !metadataFilters?.source && !metadataFilters?._recent_upload_source) {
+      metadataFilters = {
+        ...(metadataFilters || {}),
+        _recent_upload_source: state.latestUploadedSource,
+      };
+    }
     const response = await fetch(`${state.apiBase}/chat/agent`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -727,6 +735,7 @@ $("#uploadKnowledge").addEventListener("click", async () => {
     });
     const payload = await response.json();
     prettyPrint(resultBox, payload);
+    state.latestUploadedSource = payload.source || payload.filename || null;
   } catch (error) {
     resultBox.textContent = `上传失败：${error.message}`;
   }

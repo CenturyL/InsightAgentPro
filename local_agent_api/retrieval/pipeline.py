@@ -70,6 +70,8 @@ def _to_chroma_where(metadata_filters: dict[str, Any] | None) -> dict[str, Any] 
 
     clauses: list[dict[str, Any]] = []
     for key, value in metadata_filters.items():
+        if key.startswith("_"):
+            continue
         if value is None or value == "":
             continue
         clauses.append({key: value})
@@ -205,13 +207,26 @@ def _table_file_to_text(file_path: str) -> str:
 
 
 def _ocr_image_to_text(file_path: str) -> str:
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+
+        engine = RapidOCR()
+        result, _ = engine(file_path)
+        if result:
+            lines = [item[1] for item in result if len(item) >= 2 and item[1]]
+            text = "\n".join(lines).strip()
+            if text:
+                return text
+    except Exception:
+        pass
+
     tesseract = shutil.which("tesseract")
     if not tesseract:
         raise RuntimeError("tesseract binary not found, cannot OCR image file")
 
     for lang in ("chi_sim+eng", "eng"):
         result = subprocess.run(
-            [tesseract, file_path, "stdout", "-l", lang],
+            [tesseract, file_path, "stdout", "-l", lang, "--psm", "6"],
             capture_output=True,
             text=True,
         )
@@ -392,6 +407,25 @@ def process_and_store_document(file_path: str, metadata_overrides: dict[str, Any
     return len(splits)
 
 
+def get_documents_by_source(source: str, limit: int = 12) -> list[Document]:
+    vector_store = get_vector_store()
+    for field_name in ("source", "upload_name"):
+        payload = vector_store.get(
+            where={field_name: source},
+            limit=limit,
+            include=["documents", "metadatas"],
+        )
+        documents = payload.get("documents", [])
+        metadatas = payload.get("metadatas", [])
+        docs = [
+            Document(page_content=content, metadata=metadata or {})
+            for content, metadata in zip(documents, metadatas)
+        ]
+        if docs:
+            return docs
+    return []
+
+
 def has_document_source(file_path: str) -> bool:
     vector_store = get_vector_store()
     existing = vector_store.get(limit=10000, include=["metadatas"])
@@ -438,22 +472,25 @@ def search_knowledge(
     metadata_filters: dict[str, Any] | None = None,
     strategy: SearchStrategy = "hybrid_rerank",
 ) -> list[Document]:
+    recent_upload_source = (metadata_filters or {}).get("_recent_upload_source")
     dense_docs = dense_search_knowledge(
         query,
         k=k,
         candidate_k=candidate_k,
         metadata_filters=metadata_filters,
     )
+    priority_docs = get_documents_by_source(recent_upload_source, limit=max(candidate_k, k * 2)) if recent_upload_source else []
 
     if strategy == "dense_only":
-        return dense_docs[:k]
+        return _merge_documents(priority_docs, dense_docs, limit=max(k, candidate_k))[:k]
     if strategy == "dense_rerank":
-        return dense_rerank_search_knowledge(
+        reranked = dense_rerank_search_knowledge(
             query,
             k=k,
             candidate_k=candidate_k,
             metadata_filters=metadata_filters,
         )
+        return _merge_documents(priority_docs, reranked, limit=max(k, candidate_k))[:k]
 
     lexical_docs: list[Document] = []
     if strategy in {"hybrid_only", "hybrid_rerank"}:
@@ -464,7 +501,7 @@ def search_knowledge(
             metadata_filters=metadata_filters,
         )
 
-    merged = _merge_documents(dense_docs, lexical_docs, limit=max(candidate_k, k * 2))
+    merged = _merge_documents(priority_docs, _merge_documents(dense_docs, lexical_docs, limit=max(candidate_k, k * 2)), limit=max(candidate_k, k * 2))
     if strategy == "hybrid_only":
         return merged[:k]
 
