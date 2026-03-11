@@ -1,4 +1,4 @@
-"""FastAPI route layer: maps HTTP endpoints to chat, ingestion, and eval services."""
+"""FastAPI 路由层：把 HTTP 接口映射到聊天、入库和评估服务。"""
 
 import os
 import uuid
@@ -82,7 +82,7 @@ async def chat_agent_endpoint(request: ChatRequest):
 
 @router.post("/eval/retrieval", summary="运行离线检索评估")
 async def run_retrieval_eval_endpoint(request: RetrievalEvalRequest):
-    """HTTP wrapper for offline retrieval evaluation."""
+    """离线检索评估接口封装。"""
     try:
         metrics = run_retrieval_eval_job(
             dataset_path=request.dataset_path,
@@ -99,7 +99,7 @@ async def run_retrieval_eval_endpoint(request: RetrievalEvalRequest):
 
 @router.post("/eval/retrieval/compare", summary="运行检索 baseline 对比")
 async def run_retrieval_compare_endpoint(request: RetrievalEvalRequest):
-    """HTTP wrapper for baseline strategy comparison."""
+    """检索 baseline 对比接口封装。"""
     try:
         report = run_retrieval_compare_job(
             dataset_path=request.dataset_path,
@@ -113,7 +113,7 @@ async def run_retrieval_compare_endpoint(request: RetrievalEvalRequest):
 
 @router.post("/eval/generation", summary="运行离线生成评估")
 async def run_generation_eval_endpoint(request: GenerationEvalRequest):
-    """HTTP wrapper for generation-quality evaluation."""
+    """生成质量评估接口封装。"""
     try:
         metrics = await run_generation_eval_job(
             dataset_path=request.dataset_path,
@@ -128,7 +128,7 @@ async def run_generation_eval_endpoint(request: GenerationEvalRequest):
 
 @router.post("/testing/rebuild", summary="一键重建本地测试环境")
 async def rebuild_test_env_endpoint(request: RebuildTestEnvRequest):
-    """Recreate the demo corpus and benchmark datasets used by the frontend."""
+    """重建前端演示用测试语料和 benchmark 数据集。"""
     try:
         result = rebuild_test_environment(
             force_download=request.force_download,
@@ -141,7 +141,7 @@ async def rebuild_test_env_endpoint(request: RebuildTestEnvRequest):
 
 @router.post("/eval/benchmark", summary="运行系统 benchmark")
 async def run_system_benchmark_endpoint(request: SystemBenchmarkRequest):
-    """Measure end-to-end latency for the default benchmark scenarios."""
+    """运行系统级 benchmark，测默认场景下的端到端时延。"""
     try:
         metrics = await run_system_benchmark_job(
             retrieval_dataset_path=request.retrieval_dataset_path,

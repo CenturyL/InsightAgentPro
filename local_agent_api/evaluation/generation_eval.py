@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Offline answer-quality evaluation driven by real agent output plus an LLM judge."""
+"""离线生成评估：真实 agent 输出 + LLM judge 的组合评分。"""
 
 import json
 import re
@@ -15,7 +15,7 @@ from local_agent_api.services.agent_service import get_agent_stream
 
 
 class GenerationEvalItem(BaseModel):
-    """One generation test case with optional gold answer and keyword hints."""
+    """一条生成评估样本，可带标准答案和关键词提示。"""
     query: str
     expected_answer: str | None = None
     expected_keywords: list[str] = Field(default_factory=list)
@@ -24,7 +24,7 @@ class GenerationEvalItem(BaseModel):
 
 
 class GenerationJudgeResult(BaseModel):
-    """Judge-model output for one generated answer."""
+    """judge 模型对单条生成答案给出的评分结果。"""
     answer_relevance: float = Field(ge=0.0, le=1.0)
     faithfulness: float = Field(ge=0.0, le=1.0)
     citation_accuracy: float = Field(ge=0.0, le=1.0)
@@ -32,7 +32,7 @@ class GenerationJudgeResult(BaseModel):
 
 
 class GenerationEvalMetrics(BaseModel):
-    """Aggregate generation-quality metrics with per-sample rationale and evidence."""
+    """生成质量聚合指标，以及每条样本的理由和证据明细。"""
     dataset_size: int
     avg_answer_relevance: float
     avg_faithfulness: float
@@ -70,7 +70,7 @@ LOG_LINE_PREFIXES = ("🧭", "🛠️", "✅")
 
 
 def _extract_json_object(raw: str) -> str:
-    """Recover the JSON body even when the judge wraps it in prose or code fences."""
+    """即使 judge 回复外面包了说明文字或代码块，也尽量提取 JSON 主体。"""
     raw = raw.strip()
     fenced_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, flags=re.S)
     if fenced_match:
@@ -82,7 +82,7 @@ def _extract_json_object(raw: str) -> str:
 
 
 def _keyword_coverage(answer: str, expected_keywords: list[str]) -> float:
-    """Cheap lexical coverage score to complement model-based judging."""
+    """补充一个轻量的关键词覆盖率指标。"""
     if not expected_keywords:
         return 1.0
     hits = sum(1 for keyword in expected_keywords if keyword and keyword in answer)
@@ -90,7 +90,7 @@ def _keyword_coverage(answer: str, expected_keywords: list[str]) -> float:
 
 
 def _sanitize_agent_answer(answer: str) -> str:
-    """Remove internal trace lines before sending the answer to the judge model."""
+    """在送给 judge 之前去掉执行日志等内部 trace 行。"""
     lines = []
     for line in answer.splitlines():
         stripped = line.strip()
@@ -103,7 +103,7 @@ def _sanitize_agent_answer(answer: str) -> str:
 
 
 def load_generation_eval_dataset(dataset_path: str) -> list[GenerationEvalItem]:
-    """Load JSONL generation-eval cases."""
+    """加载 JSONL 格式的生成评估样本。"""
     path = Path(dataset_path)
     if not path.exists():
         raise FileNotFoundError(f"generation eval dataset not found: {dataset_path}")
@@ -127,7 +127,7 @@ async def _collect_agent_answer(
     task_mode: str | None = None,
     metadata_filters: dict[str, Any] | None = None,
 ) -> str:
-    """Run the real agent stream end-to-end and merge chunks into one answer string."""
+    """完整跑一遍真实 agent 流式输出，并把 chunk 合并成最终答案。"""
     chunks = []
     async for chunk in get_agent_stream(
         query,
@@ -144,7 +144,7 @@ async def _judge_generation(
     model_answer: str,
     evidence: str,
 ) -> GenerationJudgeResult:
-    """Ask the advanced model to score a generated answer against evidence/gold text."""
+    """调用高级模型，根据证据和标准答案为生成结果打分。"""
     prompt = JUDGE_PROMPT.format(
         query=query,
         expected_answer=expected_answer or "无标准答案，仅根据问题和证据进行评估",
@@ -157,7 +157,7 @@ async def _judge_generation(
 
 
 async def run_generation_eval(dataset_path: str, candidate_k: int = 15) -> GenerationEvalMetrics:
-    """Run generation evaluation across the labeled dataset and aggregate scores."""
+    """在标注数据集上运行生成评估并汇总各项分数。"""
     items = load_generation_eval_dataset(dataset_path)
     if not items:
         return GenerationEvalMetrics(

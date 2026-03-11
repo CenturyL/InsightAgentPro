@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""Retry weak or failed steps after the first execution pass."""
+"""对第一轮执行中证据不足或失败的步骤做补救重试。"""
 
 from local_agent_api.agents.state import OrchestratorState
 from local_agent_api.retrieval.pipeline import retrieve_knowledge_bundle
 
 
 def _needs_reflection(state: OrchestratorState) -> bool:
-    """Only trigger reflection when at least one step is partial or failed."""
+    """只有至少一个步骤是 partial/failed 时才进入 reflection。"""
     results = state.get("step_results", [])
     if not results:
         return False
@@ -15,7 +15,7 @@ def _needs_reflection(state: OrchestratorState) -> bool:
 
 
 async def reflection_node(state: OrchestratorState) -> OrchestratorState:
-    """Expand recall for weak steps and update the plan/result status in place."""
+    """扩大召回范围重试弱步骤，并同步更新 plan 与 step_results。"""
     if not _needs_reflection(state):
         return state
 

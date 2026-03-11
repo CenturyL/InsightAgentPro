@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Compare multiple retrieval strategies against the same labeled dataset."""
+"""在同一标注数据集上对比多种检索策略。"""
 
 from pydantic import BaseModel
 
@@ -17,7 +17,7 @@ BASELINE_STRATEGIES: list[SearchStrategy] = [
 
 
 class RetrievalCompareReport(BaseModel):
-    """Bundle all baseline reports plus lift/delta summaries for the frontend."""
+    """封装各 baseline 报告及其相对提升/时延差异摘要。"""
     dataset_size: int
     top_k: int
     candidate_k: int
@@ -30,7 +30,7 @@ def run_retrieval_compare(
     top_k: int = 3,
     candidate_k: int = 15,
 ) -> RetrievalCompareReport:
-    """Run all baseline strategies so their metrics can be compared side by side."""
+    """运行所有 baseline 策略，便于横向对比指标。"""
     reports = [
         run_retrieval_eval(
             dataset_path=dataset_path,

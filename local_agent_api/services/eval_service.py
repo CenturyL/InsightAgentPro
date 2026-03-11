@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Thin service layer that resolves dataset paths and delegates to eval modules."""
+"""评估服务薄封装：解析数据集路径并分发到各评估模块。"""
 
 from pathlib import Path
 
@@ -20,7 +20,7 @@ DEFAULT_GENERATION_EVAL_DATASET = "local_agent_api/data/eval/generation_eval_dat
 
 
 def _resolve_path(path_str: str) -> Path:
-    """Allow API callers to pass either absolute paths or repo-relative dataset paths."""
+    """允许 API 同时传绝对路径和仓库相对路径。"""
     path = Path(path_str)
     if path.is_absolute():
         return path
@@ -35,7 +35,7 @@ def run_retrieval_eval_job(
     candidate_k: int = 15,
     strategy: str = "hybrid_rerank",
 ) -> RetrievalEvalMetrics:
-    """Convenience wrapper used by the API route for retrieval evaluation."""
+    """供 API 路由调用的检索评估便捷封装。"""
     resolved_path = dataset_path or DEFAULT_RETRIEVAL_EVAL_DATASET
     path = _resolve_path(resolved_path)
     return run_retrieval_eval(str(path), top_k=top_k, candidate_k=candidate_k, strategy=strategy)  # type: ignore[arg-type]
@@ -46,7 +46,7 @@ def run_retrieval_compare_job(
     top_k: int = 3,
     candidate_k: int = 15,
 ) -> RetrievalCompareReport:
-    """Run baseline strategy comparison on the requested dataset."""
+    """运行指定数据集上的检索 baseline 对比。"""
     resolved_path = dataset_path or DEFAULT_RETRIEVAL_COMPARE_DATASET
     path = _resolve_path(resolved_path)
     return run_retrieval_compare(str(path), top_k=top_k, candidate_k=candidate_k)
@@ -56,7 +56,7 @@ async def run_generation_eval_job(
     dataset_path: str | None = None,
     candidate_k: int = 15,
 ) -> GenerationEvalMetrics:
-    """Run generation-quality evaluation with the advanced judge model."""
+    """调用高级 judge 模型运行生成质量评估。"""
     resolved_path = dataset_path or DEFAULT_GENERATION_EVAL_DATASET
     path = _resolve_path(resolved_path)
     return await run_generation_eval(str(path), candidate_k=candidate_k)
@@ -66,7 +66,7 @@ async def run_system_benchmark_job(
     retrieval_dataset_path: str | None = None,
     candidate_k: int = 8,
 ) -> SystemBenchmarkMetrics:
-    """Run the default end-to-end benchmark scenario surfaced in the frontend."""
+    """运行前端展示的默认端到端 benchmark 场景。"""
     resolved_path = retrieval_dataset_path or DEFAULT_RETRIEVAL_COMPARE_DATASET
     path = _resolve_path(resolved_path)
     return await run_system_benchmark(

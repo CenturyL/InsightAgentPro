@@ -4,7 +4,7 @@ from langchain_core.messages import ToolMessage
 from local_agent_api.core.llm import basic_model, advanced_model
 from local_agent_api.core.config import settings
 
-"""Middleware hooks for simple-path tool recovery, memory injection, and model routing."""
+"""简单路径的中间件集合：工具兜底、长期记忆注入、动态模型路由。"""
 
 
 # tool calling 错误处理

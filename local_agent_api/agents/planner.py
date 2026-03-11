@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Planner node: turn a natural-language task into a small structured step list."""
+"""Planner 节点：把自然语言任务转换为结构化步骤列表。"""
 
 import json
 import re
@@ -45,7 +45,7 @@ PLANNER_STEPS_ADAPTER = TypeAdapter(list[PlannerStepSchema])
 
 # 兜底，返回固定通用prompt
 def _fallback_plan(query: str) -> list[PlanStep]:
-    """Return a safe default plan when the model output cannot be parsed."""
+    """当模型输出无法解析时，返回一份可执行的保底计划。"""
     return [
         {
             "step_id": "step_1",
@@ -75,7 +75,7 @@ def _fallback_plan(query: str) -> list[PlanStep]:
 
 # 从模型回复里提取并初步处理 JSON 块或数组
 def _extract_json_block(raw: str) -> str:
-    """Pull the most likely JSON array out of a model response with prose/fences."""
+    """从可能带解释文字或代码块的模型回复中提取最像 JSON 的数组部分。"""
     raw = raw.strip() # 去首尾空格
     # 优先找 ```json ... ``` ,再找 ``` ... ```
     fenced_match = re.search(r"```(?:json)?\s*(\[.*\])\s*```", raw, flags=re.S)
@@ -90,7 +90,7 @@ def _extract_json_block(raw: str) -> str:
 
 # LLM回复 校验与标准化
 def _normalize_plan(raw: str, query: str) -> list[PlanStep]:
-    """Parse, validate, and normalize planner output into executor-ready steps."""
+    """解析、校验并标准化 planner 输出，使其可被 executor 直接消费。"""
     # 先把json变成内存字典python对象（调用初步处理）
     parsed = json.loads(_extract_json_block(raw))
     # 格式校验（TypeAdapter）
@@ -114,7 +114,7 @@ def _normalize_plan(raw: str, query: str) -> list[PlanStep]:
 
 # planner主函数，直接显式用advanced_model
 async def planner_node(state: OrchestratorState) -> OrchestratorState:
-    """Generate a structured execution plan for the complex-task graph."""
+    """为复杂任务工作流生成结构化执行计划。"""
     # 拿最后一个query
     query = str(state["messages"][-1].content) if state.get("messages") else ""
     # 组装prompt

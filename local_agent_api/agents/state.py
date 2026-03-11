@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Typed state definitions shared across the complex-task orchestration graph."""
+"""复杂任务编排图共享的 TypedDict 状态定义。"""
 
 from typing import Any, Literal
 
@@ -10,7 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 
 class PlanStep(TypedDict):
-    """One planner-produced unit of work for the executor to consume."""
+    """planner 生成的一条步骤定义，供 executor 按步执行。"""
     step_id: str
     goal: str
     reason: str
@@ -20,7 +20,7 @@ class PlanStep(TypedDict):
 
 
 class StepResult(TypedDict):
-    """Step-level execution output used by reflection and final synthesis."""
+    """单个步骤的执行结果，供 reflection 和 synthesis 使用。"""
     step_id: str
     goal: str
     query: str
@@ -29,7 +29,7 @@ class StepResult(TypedDict):
 
 
 class OrchestratorState(TypedDict):
-    """Shared state passed between complex-task nodes in LangGraph."""
+    """LangGraph 复杂任务节点之间传递的共享状态。"""
     messages: list[BaseMessage]
     user_id: str
     thread_id: str

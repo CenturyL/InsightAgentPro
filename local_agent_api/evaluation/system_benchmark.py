@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""System-level benchmark for retrieval latency and simple/complex request timing."""
+"""系统级 benchmark：衡量检索时延与简单/复杂请求耗时。"""
 
 import asyncio
 import json
@@ -17,14 +17,14 @@ from local_agent_api.services.agent_service import get_agent_stream
 
 
 class BenchmarkQueryConfig(BaseModel):
-    """One benchmark request definition passed into the live agent pipeline."""
+    """一次 benchmark 请求的配置定义。"""
     query: str
     task_mode: str | None = None
     metadata_filters: dict[str, Any] | None = None
 
 
 class SystemBenchmarkMetrics(BaseModel):
-    """High-level latency and memory metrics surfaced in the benchmark panel."""
+    """前端 benchmark 面板展示的高层时延与内存指标。"""
     retrieval_dataset_size: int
     retrieval_avg_latency_ms: float
     retrieval_p95_latency_ms: float
@@ -36,7 +36,7 @@ class SystemBenchmarkMetrics(BaseModel):
 
 
 def _load_jsonl(path: str) -> list[dict[str, Any]]:
-    """Load benchmark inputs from JSONL without imposing a stricter schema."""
+    """读取 benchmark 用 JSONL 输入，不额外施加强约束 schema。"""
     rows = []
     with Path(path).open("r", encoding="utf-8") as f:
         for line in f:
@@ -48,7 +48,7 @@ def _load_jsonl(path: str) -> list[dict[str, Any]]:
 
 
 async def _run_agent_once(config: BenchmarkQueryConfig) -> tuple[float, int]:
-    """Measure one end-to-end streamed agent run and count its output length."""
+    """测量一次完整 agent 请求的端到端时延和输出长度。"""
     start = time.perf_counter()
     chunks = []
     async for chunk in get_agent_stream(
@@ -62,7 +62,7 @@ async def _run_agent_once(config: BenchmarkQueryConfig) -> tuple[float, int]:
 
 
 def _p95(values: list[float]) -> float:
-    """Tail latency helper for benchmark reporting."""
+    """计算 benchmark 报告里使用的 P95。"""
     if len(values) == 1:
         return values[0]
     return statistics.quantiles(values, n=100)[94]
@@ -74,7 +74,7 @@ async def run_system_benchmark(
     complex_query: BenchmarkQueryConfig,
     candidate_k: int = 8,
 ) -> SystemBenchmarkMetrics:
-    """Measure retrieval throughput plus one simple and one complex live request."""
+    """测量检索吞吐，以及一条简单请求和一条复杂请求的真实耗时。"""
     rows = _load_jsonl(retrieval_dataset_path)
     retrieval_latencies = []
 

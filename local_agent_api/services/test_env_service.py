@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Prepare a reproducible public-document corpus for ingestion and evaluation demos."""
+"""准备可复现的公开测试语料，用于入库和评估演示。"""
 
 import json
 import re
@@ -201,22 +201,22 @@ TEST_DOC_SOURCES = [
 
 
 def _project_root() -> Path:
-    """Resolve the project root from the service module location."""
+    """从当前 service 文件位置反推项目根目录。"""
     return Path(__file__).resolve().parent.parent
 
 
 def _test_docs_dir() -> Path:
-    """Directory that stores downloaded raw test documents and cleaned text files."""
+    """存放下载原文和清洗后文本的测试文档目录。"""
     return _project_root() / "data" / "test_docs"
 
 
 def _eval_dir() -> Path:
-    """Directory that stores generated JSONL datasets for offline evaluation."""
+    """存放离线评估 JSONL 数据集的目录。"""
     return _project_root() / "data" / "eval"
 
 
 def _download_if_needed(url: str, destination: Path, force_download: bool) -> None:
-    """Fetch a public document only when missing or when force refresh is requested."""
+    """仅在缺失或强制刷新时下载公开文档。"""
     if destination.exists() and not force_download:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +246,7 @@ def _download_if_needed(url: str, destination: Path, force_download: bool) -> No
 
 
 def _clean_html_to_text(raw_path: Path, clean_path: Path) -> None:
-    """Strip HTML tags/scripts/styles so the result is easier to chunk and index."""
+    """去掉 HTML 标签、脚本和样式，生成更适合切块入库的纯文本。"""
     text = raw_path.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
@@ -260,7 +260,7 @@ def _clean_html_to_text(raw_path: Path, clean_path: Path) -> None:
 
 
 def _metadata_from_source(source: dict[str, Any]) -> dict[str, Any]:
-    """Translate a test-source descriptor into ingestion metadata overrides."""
+    """把测试源配置翻译成入库时使用的 metadata overrides。"""
     return {
         "title": source.get("title"),
         "region": source.get("region"),
@@ -272,7 +272,7 @@ def _metadata_from_source(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rewrite_eval_datasets(clean_paths: dict[str, Path]) -> dict[str, str]:
-    """Rebuild retrieval/generation JSONL datasets after documents are refreshed."""
+    """在文档刷新后重建 retrieval/generation 两类评估数据集。"""
     eval_dir = _eval_dir()
     eval_dir.mkdir(parents=True, exist_ok=True)
 
@@ -384,7 +384,7 @@ def rebuild_test_environment(
     force_download: bool = False,
     run_retrieval_eval: bool = True,
 ) -> dict[str, Any]:
-    """Download, clean, ingest, and optionally evaluate the demo test corpus."""
+    """下载、清洗、入库，并可选自动评估演示用测试语料。"""
     test_docs_dir = _test_docs_dir()
     test_docs_dir.mkdir(parents=True, exist_ok=True)
 

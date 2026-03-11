@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Helpers for converting retrieved documents into lightweight citation records."""
+"""把检索结果文档转换为轻量引用记录的辅助函数。"""
 
 from langchain_core.documents import Document
 
 
 def build_citations(docs: list[Document]) -> list[dict]:
-    """Normalize document metadata so downstream code can render consistent citations."""
+    """标准化文档元数据，方便后续统一渲染 citations。"""
     citations: list[dict] = []
     for idx, doc in enumerate(docs, start=1):
         metadata = doc.metadata or {}
@@ -26,7 +26,7 @@ def build_citations(docs: list[Document]) -> list[dict]:
 
 
 def format_citations(citations: list[dict]) -> str:
-    """Render citations into plain text for prompts and fallback answers."""
+    """把引用列表渲染成纯文本，供 prompt 和 fallback 答案使用。"""
     if not citations:
         return "无"
 

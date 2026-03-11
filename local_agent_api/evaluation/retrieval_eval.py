@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Offline retrieval metrics used to compare recall/precision/ranking quality."""
+"""离线检索评估：用于比较召回、精度和排序质量。"""
 
 import json
 import statistics
@@ -14,14 +14,14 @@ from local_agent_api.retrieval.pipeline import SearchStrategy, retrieve_knowledg
 
 
 class RetrievalEvalItem(BaseModel):
-    """One gold query with relevant sources and optional metadata filters."""
+    """一条带 gold source 和可选过滤条件的检索评估样本。"""
     query: str
     relevant_sources: list[str] = Field(default_factory=list)
     metadata_filters: dict[str, Any] | None = None
 
 
 class RetrievalEvalMetrics(BaseModel):
-    """Aggregate retrieval metrics plus per-query diagnostic details."""
+    """聚合检索指标以及逐条 query 的诊断细节。"""
     dataset_size: int
     top_k: int
     strategy: str
@@ -36,12 +36,12 @@ class RetrievalEvalMetrics(BaseModel):
 
 
 def _normalize_source(source: str) -> str:
-    """Compare sources by basename to avoid path-prefix differences across machines."""
+    """仅按 basename 比较 source，避免不同机器上的路径前缀影响评估。"""
     return Path(source).name.lower().strip()
 
 
 def _match_relevance(retrieved_sources: list[str], relevant_sources: list[str]) -> int:
-    """Count unique source-level hits rather than duplicated chunk-level hits."""
+    """按唯一 source 计命中，避免同一文档多个 chunk 重复加分。"""
     normalized_relevant = {_normalize_source(source) for source in relevant_sources}
     seen = set()
     hits = 0
@@ -56,7 +56,7 @@ def _match_relevance(retrieved_sources: list[str], relevant_sources: list[str]) 
 
 
 def _first_relevant_rank(retrieved_sources: list[str], relevant_sources: list[str]) -> int | None:
-    """Return the first unique hit rank for reciprocal-rank style metrics."""
+    """返回第一个唯一命中 source 的排名，用于 RR/MRR 计算。"""
     normalized_relevant = {_normalize_source(source) for source in relevant_sources}
     seen = set()
     for idx, source in enumerate(retrieved_sources, start=1):
@@ -70,7 +70,7 @@ def _first_relevant_rank(retrieved_sources: list[str], relevant_sources: list[st
 
 
 def _dcg(relevance_flags: list[int]) -> float:
-    """Compute discounted cumulative gain for the current ranking."""
+    """计算当前排序结果的 DCG 分数。"""
     score = 0.0
     for idx, rel in enumerate(relevance_flags, start=1):
         if rel:
@@ -79,7 +79,7 @@ def _dcg(relevance_flags: list[int]) -> float:
 
 
 def _unique_retrieved_sources(retrieved_sources: list[str]) -> list[str]:
-    """Collapse multiple chunks from the same source into one evaluation item."""
+    """把同一 source 的多个 chunk 折叠成一个评估项。"""
     unique = []
     seen = set()
     for source in retrieved_sources:
@@ -92,7 +92,7 @@ def _unique_retrieved_sources(retrieved_sources: list[str]) -> list[str]:
 
 
 def _p95(values: list[float]) -> float:
-    """Small helper for the latency tail metric shown in benchmark panels."""
+    """计算时延尾部指标 P95。"""
     if not values:
         return 0.0
     if len(values) == 1:
@@ -101,7 +101,7 @@ def _p95(values: list[float]) -> float:
 
 
 def load_retrieval_eval_dataset(dataset_path: str) -> list[RetrievalEvalItem]:
-    """Load JSONL retrieval labels from disk into typed eval items."""
+    """从磁盘读取 JSONL 检索评估集，并转成强类型对象。"""
     path = Path(dataset_path)
     if not path.exists():
         raise FileNotFoundError(f"retrieval eval dataset not found: {dataset_path}")
@@ -126,7 +126,7 @@ def run_retrieval_eval(
     candidate_k: int = 15,
     strategy: SearchStrategy = "hybrid_rerank",
 ) -> RetrievalEvalMetrics:
-    """Run one retrieval strategy against the gold dataset and summarize metrics."""
+    """运行单一检索策略，并汇总离线检索指标。"""
     items = load_retrieval_eval_dataset(dataset_path)
     if not items:
         return RetrievalEvalMetrics(
