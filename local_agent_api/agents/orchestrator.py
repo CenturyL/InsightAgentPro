@@ -61,7 +61,7 @@ def _format_instruction_for_mode(task_mode: str | None) -> str:
         return "使用“摘要 / 关键发现 / 详细分析 / 风险与不确定性 / 下一步建议”结构。"
     return "优先使用清晰分点回答；若信息较多，可以补充短表格。"
 
-
+# 拼 synthesizer 看的最终提示词
 def build_synthesizer_prompt(state: OrchestratorState) -> str:
     """把计划、步骤证据和引用来源拼成 synthesizer 最终提示词。"""
     query = str(state["messages"][-1].content) if state.get("messages") else ""
@@ -83,7 +83,7 @@ def build_synthesizer_prompt(state: OrchestratorState) -> str:
         sources_text=format_citations(state.get("citations", [])) if state.get("citations") else "无",
     )
 
-
+# 生成最终答案
 async def synthesizer_node(state: OrchestratorState) -> OrchestratorState:
     """根据中间执行状态生成最终给用户看的答案。"""
     task_mode = state.get("task_mode", "qa")
