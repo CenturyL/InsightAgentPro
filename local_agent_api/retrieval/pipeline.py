@@ -47,7 +47,7 @@ def get_vector_store() -> Chroma:
         persist_directory=settings.VECTOR_STORE_PATH,
     )
 
-
+# 推断metadata
 def infer_metadata_filters(query: str) -> dict[str, Any]:
     filters: dict[str, Any] = {}
 
@@ -84,7 +84,7 @@ def _to_chroma_where(metadata_filters: dict[str, Any] | None) -> dict[str, Any] 
         return clauses[0]
     return {"$and": clauses}
 
-
+# lexical用的关键词打分函数
 def _keyword_score(query: str, doc: Document) -> int:
     tokens = [token for token in re.split(r"[\s,，。；;：:\n]+", query) if len(token) >= 2]
     content = doc.page_content
@@ -558,7 +558,7 @@ def dense_search_knowledge(
         search_kwargs["filter"] = where
     return vector_store.similarity_search(query, **search_kwargs)
 
-
+# 向量rerank
 def dense_rerank_search_knowledge(
     query: str,
     k: int = 3,
@@ -576,7 +576,7 @@ def dense_rerank_search_knowledge(
     reranked = compressor.compress_documents(base_docs, query)
     return list(reranked)
 
-
+# 检索主函数
 def search_knowledge(
     query: str,
     k: int = 3,
@@ -584,6 +584,7 @@ def search_knowledge(
     metadata_filters: dict[str, Any] | None = None,
     strategy: SearchStrategy = "hybrid_rerank",
 ) -> list[Document]:
+    # 最近上传文件
     recent_upload_source = (metadata_filters or {}).get("_recent_upload_source")
     dense_docs = dense_search_knowledge(
         query,
@@ -594,8 +595,10 @@ def search_knowledge(
     priority_docs = get_documents_by_source(recent_upload_source, limit=max(candidate_k, k * 2)) if recent_upload_source else []
 
     if strategy == "dense_only":
+        # 直接 priority_docs 和 dense_docs 去重合并截取返回
         return _merge_documents(priority_docs, dense_docs, limit=max(k, candidate_k))[:k]
     if strategy == "dense_rerank":
+        # 对dense_docs进行rerank，再拼priority_docs
         reranked = dense_rerank_search_knowledge(
             query,
             k=k,
@@ -649,7 +652,7 @@ def lexical_search_knowledge(
 def format_docs(docs: list[Document]) -> str:
     return "\n\n".join(doc.page_content for doc in docs)
 
-
+# RAG主函数
 def retrieve_knowledge_bundle(
     query: str,
     k: int = 3,
@@ -657,7 +660,9 @@ def retrieve_knowledge_bundle(
     metadata_filters: dict[str, Any] | None = None,
     strategy: SearchStrategy = "hybrid_rerank",
 ) -> RetrievalBundle:
+    # 生成过滤条件
     applied_filters = metadata_filters or infer_metadata_filters(query)
+    # 执行检索，拿到child chunk & 获取parent id
     docs = search_knowledge(
         query,
         k=k,
@@ -670,6 +675,7 @@ def retrieve_knowledge_bundle(
         for doc in docs
         if (doc.metadata or {}).get("parent_id")
     ]
+    # 捞回 parent block，最终 = parent-first | child-fallback。
     parent_docs = get_parent_documents(parent_ids)
     context_docs = parent_docs or docs
     return RetrievalBundle(

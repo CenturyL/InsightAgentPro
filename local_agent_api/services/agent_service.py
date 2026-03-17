@@ -248,7 +248,7 @@ async def _run_plan_and_execute_stream(
         yield chunk
 
 
-# ── 长期记忆后台提取 ─────────────────────────────────────────────────────────
+# 保存长期记忆
 async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
     """
     对话结束后，异步地从本轮对话中提取用户关键信息并存入 pgvector。

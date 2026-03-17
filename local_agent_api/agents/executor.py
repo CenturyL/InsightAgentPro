@@ -45,7 +45,7 @@ async def executor_node(state: OrchestratorState) -> OrchestratorState:
                     "step_id": step["step_id"],
                     "goal": step["goal"],
                     "query": step_query,
-                    "evidence": evidence,
+                    "evidence": evidence, # Reflection用
                     "status": status,
                 }
             )

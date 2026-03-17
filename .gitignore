@@ -1,0 +1,25 @@
+.DS_Store
+*.py[cod]
+__pycache__/
+
+# Local environment and secrets
+.env
+local_agent_api/.env
+
+# Python caches and test artifacts
+.pytest_cache/
+.mypy_cache/
+
+# Vector stores and local data artifacts
+local_agent_api/data/chroma_db/
+local_agent_api/data/parent_store/
+local_agent_api/scripts/local_agent_api/data/chroma_db/
+
+# Frontend dependencies and build outputs
+local_agent_frontend/node_modules/
+local_agent_frontend/dist/
+local_agent_frontend/.vite/
+
+# OS / editor noise
+*.swp
+*.swo

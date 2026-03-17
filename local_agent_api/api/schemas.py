@@ -8,7 +8,7 @@ class ChatRequest(BaseModel):
     """统一聊天请求体，供直连 chat 和 agent 接口复用。"""
     query: str = Field(..., description="用户的提问内容")
     temperature: float = Field(default=0.7, description="模型生成的温度值，越高越有创造性")
-    # P1-7：会话 ID，传入相同 thread_id 可保持多轮对话记忆
+    # 会话 ID，传入相同 thread_id 可保持多轮对话记忆
     # 不传则每次独立（自动分配 UUID），传固定值则持续累积历史
     thread_id: Optional[str] = Field(default=None, description="会话ID，相同ID保持多轮记忆，不传则每次独立")
     # 长期记忆：用户唯一标识（如用户名/邮箱），用于 pgvector 按用户隔离存取历史记忆

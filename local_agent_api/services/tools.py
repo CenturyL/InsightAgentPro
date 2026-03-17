@@ -4,7 +4,6 @@ from local_agent_api.retrieval.pipeline import retrieve_knowledge_bundle
 from local_agent_api.services.tool_context import get_tool_metadata_filters
 
 # 工具1：【通用知识检索】
-# response_format="content_and_artifact"：
 #   - 返回 tuple[str, list]，str 进入 LLM 上下文，list(Documents) 作为 artifact 保留原始来源
 #   - 这样 Agent 在引用时可以携带文档出处，便于后续实现 citation 功能
 @tool(response_format="content_and_artifact")
@@ -18,6 +17,7 @@ def search_policy_and_tender_knowledge(query: str) -> tuple[str, list]:
 
     return bundle.context_text, bundle.docs
 
+# 工具2：【公司内部信息检索】
 @tool(response_format="content_and_artifact")
 def search_company_rules(query: str) -> tuple[str, list]:
     """搜索公司内部制度、办公规则、WIFI 密码等内部知识。

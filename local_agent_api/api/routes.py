@@ -28,6 +28,7 @@ from local_agent_api.core.config import settings
 router = APIRouter()
 
 
+# 不走RAG，不走TOOL，不走AGENT，纯本地直接问答
 @router.post("/chat/stream", summary="基础流式对话接口(不借用知识库)")
 async def chat_stream(request: ChatRequest):
     """
@@ -45,16 +46,15 @@ async def chat_stream(request: ChatRequest):
 
     # 3. 定义异步生成器实现流式 (Streaming) 输出
     async def generate_chat():
-        # astream() 是 LangChain 核心的异步流式 API
         # 它会在收到模型的每个 token 时理解 yield 出来，而不是等全句生成完
-        async for chunk in llm.astream(messages):
+        async for chunk in llm.astream(messages): # astream() 是 LangChain 核心的异步流式 API
             yield chunk.content
 
     # 4. 使用 FastAPI 的 StreamingResponse 返回数据流
     return StreamingResponse(generate_chat(), media_type="text/plain")
 
-
-@router.post("/chat/agent", summary="全能动态智能体 Agent 接口（含 RAG + 工具 + 多轮记忆）")
+# 动态智能体 Agent 接口
+@router.post("/chat/agent", summary="动态智能体 Agent 接口（含 RAG + 工具 + 多轮记忆）")
 async def chat_agent_endpoint(request: ChatRequest):
     """
     统一智能体入口：自动在 Qwen / DeepSeek 间路由，调度知识库检索或计算工具。
@@ -80,6 +80,7 @@ async def chat_agent_endpoint(request: ChatRequest):
     return StreamingResponse(generate_agent_output(), media_type="text/plain")
 
 
+# eval接口
 @router.post("/eval/retrieval", summary="运行离线检索评估")
 async def run_retrieval_eval_endpoint(request: RetrievalEvalRequest):
     """离线检索评估接口封装。"""
@@ -97,6 +98,7 @@ async def run_retrieval_eval_endpoint(request: RetrievalEvalRequest):
         raise HTTPException(status_code=500, detail=f"检索评估失败: {exc}")
 
 
+# 对比接口
 @router.post("/eval/retrieval/compare", summary="运行检索 baseline 对比")
 async def run_retrieval_compare_endpoint(request: RetrievalEvalRequest):
     """检索 baseline 对比接口封装。"""
@@ -111,6 +113,7 @@ async def run_retrieval_compare_endpoint(request: RetrievalEvalRequest):
         raise HTTPException(status_code=500, detail=f"检索对比失败: {exc}")
 
 
+# 生成评估接口
 @router.post("/eval/generation", summary="运行离线生成评估")
 async def run_generation_eval_endpoint(request: GenerationEvalRequest):
     """生成质量评估接口封装。"""
@@ -126,6 +129,7 @@ async def run_generation_eval_endpoint(request: GenerationEvalRequest):
         raise HTTPException(status_code=500, detail=f"生成评估失败: {exc}")
 
 
+# 重建测评环境接口
 @router.post("/testing/rebuild", summary="一键重建本地测试环境")
 async def rebuild_test_env_endpoint(request: RebuildTestEnvRequest):
     """重建前端演示用测试语料和 benchmark 数据集。"""
@@ -139,6 +143,7 @@ async def rebuild_test_env_endpoint(request: RebuildTestEnvRequest):
         raise HTTPException(status_code=500, detail=f"测试环境重建失败: {exc}")
 
 
+# benchmark接口
 @router.post("/eval/benchmark", summary="运行系统 benchmark")
 async def run_system_benchmark_endpoint(request: SystemBenchmarkRequest):
     """运行系统级 benchmark，测默认场景下的端到端时延。"""
@@ -151,7 +156,7 @@ async def run_system_benchmark_endpoint(request: SystemBenchmarkRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"benchmark 失败: {exc}")
 
-
+# 上传文件接口
 @router.post("/knowledge/upload", summary="上传文件并录入本地知识库")
 async def upload_knowledge(file: UploadFile = File(...)):
     """
