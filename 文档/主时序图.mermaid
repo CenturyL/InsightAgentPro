@@ -1,0 +1,67 @@
+sequenceDiagram
+    participant U as "用户浏览器"
+    participant N as "ECS Nginx"
+    participant A as "Mac FastAPI"
+    participant S as "agent_service"
+    participant M as "middleware"
+    participant T as "tools"
+    participant P as "retrieval.pipeline"
+    participant C as "Chroma(child)"
+    participant PS as "Parent Store"
+    participant O as "Ollama/Qwen"
+    participant D as "DeepSeek API"
+
+    U->>N: GET / (前端页面)
+    N-->>U: index.html + assets
+
+    U->>N: POST /api/v1/chat/agent
+    N->>A: 反向代理到 FastAPI
+    A->>S: get_agent_stream(query, thread_id, user_id, ...)
+
+    alt 简单路径
+        S->>M: inject_long_term_memory
+        M->>M: 从 user_id 检索长期记忆并注入 prompt
+        S->>M: dynamic_model_selection
+        alt 使用本地模型
+            M->>O: 调用 basic_model
+        else 使用高级模型
+            M->>D: 调用 advanced_model
+        end
+
+        alt 模型决定调用知识工具
+            S->>T: search_policy_and_tender_knowledge(...)
+            T->>P: retrieve_knowledge_bundle(query,...)
+            P->>C: child chunk 检索
+            P->>PS: 根据 parent_id 回填 parent
+            P-->>T: docs(child) + context(parent优先) + citations
+            T-->>S: content_and_artifact
+        end
+        S-->>U: 流式返回答案
+    else 复杂路径
+        S->>D: planner_node()
+        D-->>S: 结构化 plan
+        loop 每个 step
+            S->>P: retrieve_knowledge_bundle(step_query,...)
+            P->>C: child chunk 检索
+            P->>PS: parent 回填
+            P-->>S: bundle
+        end
+        alt 某些 step partial/failed
+            S->>P: reflection 重试检索
+            P->>C: 扩大召回
+            P->>PS: parent 回填
+            P-->>S: bundle
+        end
+        S->>D: synthesizer(prompt with step_results + citations)
+        D-->>S: 最终答案
+        S-->>U: 流式返回答案
+    end
+
+    Note over U,N: 文件上传也先到 ECS
+    U->>N: POST /api/v1/knowledge/upload (文件)
+    N->>A: 转发上传请求
+    A->>P: process_and_store_document(temp_file)
+    P->>P: 解析/切块
+    P->>C: 存 child
+    P->>PS: 存 parent
+    A-->>U: 返回 chunks_inserted
