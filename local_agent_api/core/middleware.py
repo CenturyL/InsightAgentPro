@@ -1,8 +1,12 @@
 from typing import Callable
+
 from langchain.agents.middleware import wrap_model_call, wrap_tool_call, ModelRequest, ModelResponse
 from langchain_core.messages import ToolMessage
+
 from local_agent_api.core.llm import basic_model, advanced_model
-from local_agent_api.core.config import settings
+from local_agent_api.runtime.context_builder import build_runtime_context
+from local_agent_api.runtime.model_router import should_use_advanced_model_for_react
+from local_agent_api.runtime.tool_registry import get_builtin_tools, get_tool_names
 
 """简单路径的中间件集合：工具兜底、长期记忆注入、动态模型路由。"""
 
@@ -25,42 +29,30 @@ async def handle_tool_errors(request, handler):
 # 向prompt注入长期记忆
 # 模型调用前，根据user_id + 当前问题检索最相关事实，并注入 system prompt
 @wrap_model_call
-async def inject_long_term_memory(
+async def inject_runtime_context(
     request: ModelRequest,
     handler: Callable,
 ) -> ModelResponse:
     """
-    每次 LLM 调用前，检索该用户的长期记忆并注入 system_prompt。
-    利用向量相似度只注入与当前问题最相关的记忆，避免 prompt 膨胀。
-    POSTGRES_URL 未配置或检索失败时静默跳过，不影响主流程。
+    每次 LLM 调用前，统一注入 persona / 手动提示词 / skills / 长期记忆 / Markdown 记忆。
     """
     user_id = request.state.get("user_id", "")
-    if user_id and settings.POSTGRES_URL:
-        messages = request.state.get("messages", [])
-        # 取message中的人工提问（取前先检验）
-        human_msgs = [
-            m for m in messages
-            if hasattr(m, "type") and m.type == "human"
-        ]
-        # 如果有，取最后一条（过滤掉工具调用中间轮次）
-        if human_msgs:
-            query = human_msgs[-1].content
-            # 尝试导入长期记忆管理器并search
-            try:
-                from local_agent_api.core.memory import long_term_memory
-                memories = long_term_memory.search(user_id, query, k=3)
-                if memories:
-                    memory_text = "\n".join(f"- {m}" for m in memories)
-                    current_prompt = request.system_prompt or ""
-                    new_prompt = (
-                        current_prompt
-                        + f"\n\n【关于该用户的长期记忆（历史会话积累）】\n{memory_text}"
-                    )
-                    request = request.override(system_prompt=new_prompt)
-                    print(f"💡 [长期记忆] 已为 {user_id} 注入 {len(memories)} 条记忆")
-            except Exception:
-                pass  # 记忆注入失败不影响主流程
-
+    messages = request.state.get("messages", [])
+    human_msgs = [
+        m for m in messages
+        if hasattr(m, "type") and m.type == "human"
+    ]
+    if human_msgs:
+        query = str(human_msgs[-1].content)
+        runtime_context = build_runtime_context(
+            query=query,
+            user_id=user_id,
+            plan_mode=request.state.get("plan_mode"),
+            available_tool_names=get_tool_names(),
+        )
+        current_prompt = request.system_prompt or ""
+        new_prompt = current_prompt + "\n\n" + runtime_context.system_prompt
+        request = request.override(system_prompt=new_prompt)
     return await handler(request)
 
 
@@ -85,27 +77,13 @@ async def dynamic_model_selection(
     if in_tool_continuation:
         return await handler(request)
 
-    # 第一步：规则判定
-    is_complex = False
-    # 规则A：对话轮次大于2
-    if len(messages) > 2:
-        is_complex = True
-    # 规则B：最新一句话非常长
-    if len(messages) > 0 and len(messages[-1].content) > 50:
-        is_complex = True
-    # 规则C：触发某些特定词汇
-    if len(messages) > 0 and any(keyword in messages[-1].content for keyword in
-            ["总结", "分析", "比较", "对比", "政策", "招标", "投标", "公告", "提取", "报告", "公司内部", "请假", "WIFI", "时间", "几点"]):
-        is_complex = True
+    use_advanced = should_use_advanced_model_for_react(messages, request.state.get("plan_mode"))
 
-    # 第二步：路由指派
-    from local_agent_api.services.tools import AGENT_TOOLS
-    if is_complex:
-        print("🔀 [路由判定]：复杂意图/深层状态 -> 切换至 DeepSeek")
-        model = advanced_model.bind_tools(AGENT_TOOLS)
+    if use_advanced:
+        print("🔀 [路由判定]：复杂整合/高质量需求 -> 切换至 DeepSeek")
+        model = advanced_model.bind_tools(get_builtin_tools())
     else:
         print("🔀 [路由判定]：简单对话 -> 降级为本地 Qwen")
-        model = basic_model.bind_tools(AGENT_TOOLS)
+        model = basic_model.bind_tools(get_builtin_tools())
 
-    # 第三部：override新model返回
     return await handler(request.override(model=model))

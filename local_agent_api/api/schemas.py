@@ -14,7 +14,8 @@ class ChatRequest(BaseModel):
     # 长期记忆：用户唯一标识（如用户名/邮箱），用于 pgvector 按用户隔离存取历史记忆
     # 不传则不启用长期记忆功能
     user_id: Optional[str] = Field(default=None, description="用户ID，用于长期记忆隔离；不传则跳过长期记忆")
-    task_mode: Optional[str] = Field(default=None, description="可选任务模式：qa、compare、extract、report")
+    plan_mode: Optional[str] = Field(default=None, description="可选计划模式：auto、compare、extract、report、research、strict_plan")
+    task_mode: Optional[str] = Field(default=None, description="旧字段兼容：将被映射为 plan_mode")
     metadata_filters: Optional[dict[str, Any]] = Field(default=None, description="可选元数据过滤条件，如 region、year、source_type")
 
 

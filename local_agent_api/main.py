@@ -18,14 +18,13 @@ async def lifespan(app: FastAPI):
 # 1. 创建 FastAPI 实例
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="基于 FastAPI 和 本地大模型构建的智能助手API",
-    version="1.0.0",
+    description="基于 FastAPI 的通用智能体平台 API",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 # 2. 挂载我们在 routes.py 中编写的路由
-# prefix="/api/v1" 会让我们的接口变成 /api/v1/chat/stream
-app.include_router(chat_router, prefix="/api/v1", tags=["LLM Chat"])
+app.include_router(chat_router, prefix="/api/v2", tags=["LLM Chat"])
 
 # 3. 根路由（用来健康检查）
 @app.get("/")

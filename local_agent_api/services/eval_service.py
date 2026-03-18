@@ -74,7 +74,7 @@ async def run_system_benchmark_job(
         simple_query=BenchmarkQueryConfig(query="你好"),
         complex_query=BenchmarkQueryConfig(
             query="请比较上海浦东新区两份政策通知在支持对象和支持方向上的差异，并整理成要点。",
-            task_mode="compare",
+            plan_mode="compare",
             metadata_filters={"doc_category": "policy", "region": "上海"},
         ),
         candidate_k=candidate_k,

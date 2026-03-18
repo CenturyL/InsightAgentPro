@@ -25,6 +25,7 @@ class StepResult(TypedDict):
     goal: str
     query: str
     evidence: str
+    capability: str
     status: Literal["completed", "failed", "partial"]
 
 
@@ -33,7 +34,7 @@ class OrchestratorState(TypedDict):
     messages: list[BaseMessage]
     user_id: str
     thread_id: str
-    task_mode: NotRequired[str]
+    plan_mode: NotRequired[str]
     metadata_filters: NotRequired[dict[str, Any]]
     is_complex: bool
     planning_reason: NotRequired[str]
@@ -43,3 +44,4 @@ class OrchestratorState(TypedDict):
     retrieved_docs: NotRequired[list[Document]]
     citations: NotRequired[list[dict[str, Any]]]
     final_answer: NotRequired[str]
+    runtime_system_prompt: NotRequired[str]

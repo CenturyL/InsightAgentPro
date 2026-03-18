@@ -1,12 +1,11 @@
 """
 agent_service.py — 智能体服务
 
-设计要点：
-1. 懒加载单例：_agent 在第一次请求或 lifespan 初始化时创建
-2. Checkpointer 双轨：有 POSTGRES_URL → AsyncPostgresSaver（跨进程持久化）
-                       无 POSTGRES_URL → MemorySaver（进程内短期记忆）
-3. AgentState 携带 user_id，驱动长期记忆中间件按用户隔离读写 pgvector
-4. 流结束后异步后台提取本轮对话要点存入 pgvector，不阻塞响应
+V2 设计：
+1. 唯一主循环：ReAct
+2. PAE 作为高级工具 run_plan_and_execute 被主循环调用
+3. runtime 统一提供动态 prompt、模型路由、工具上下文
+4. thread_id 仍驱动短期记忆，user_id 驱动长期记忆写回
 """
 from __future__ import annotations
 
@@ -16,94 +15,62 @@ from typing_extensions import TypedDict
 
 from langchain.agents import create_agent
 from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.graph import add_messages
 from langgraph.checkpoint.memory import MemorySaver
-from local_agent_api.agents.orchestrator import build_synthesizer_prompt, orchestrator_graph
-from local_agent_api.agents.router import is_complex_query
-from local_agent_api.agents.state import OrchestratorState
-from local_agent_api.agents.planner import planner_node
-from local_agent_api.agents.executor import executor_node
-from local_agent_api.agents.reflection import reflection_node
-from local_agent_api.core.llm import basic_model, advanced_model
+
 from local_agent_api.core.config import settings
+from local_agent_api.core.llm import basic_model, advanced_model
 from local_agent_api.core.middleware import (
-    inject_long_term_memory,
     dynamic_model_selection,
     handle_tool_errors,
+    inject_runtime_context,
+)
+from local_agent_api.runtime.engine import (
+    RuntimeRequest,
+    build_runtime_prompt,
+    choose_react_model_label,
+    react_recursion_limit,
+)
+from local_agent_api.services.tool_context import (
+    drain_tool_trace,
+    reset_tool_request_context,
+    set_tool_request_context,
 )
 from local_agent_api.services.tools import AGENT_TOOLS
-from local_agent_api.services.tool_context import (
-    reset_tool_metadata_filters,
-    set_tool_metadata_filters,
-)
 
 
-# ── AgentState：含 user_id 字段，中间件通过 request.state 读取 ───────────────
 class AgentState(TypedDict):
     messages: list[BaseMessage]
-    user_id: str  # 用于隔离每位用户的长期记忆
+    user_id: str
+    plan_mode: str
 
 
-# ── 内部单例（懒加载） ─────────────────────────────────────────────────────────
 _agent = None
 _checkpointer = None
-_connection_pool = None  # AsyncPostgresSaver 依赖的连接池
+_connection_pool = None
 
-# 在简单模式下，用本地模型还是高级模型
-def _should_use_advanced_model_for_simple_path(query: str, message_count: int = 1) -> bool:
-    """与 simple agent 路径的动态路由保持一致，用于向前端标注本轮回答的模型来源。"""
-    if message_count > 2:
-        return True
-    if len(query) > 50:
-        return True
-    return any(
-        keyword in query
-        for keyword in [
-            "总结",
-            "分析",
-            "比较",
-            "对比",
-            "政策",
-            "招标",
-            "投标",
-            "公告",
-            "提取",
-            "报告",
-            "公司内部",
-            "请假",
-            "WIFI",
-            "时间",
-            "几点",
-        ]
-    )
 
-# 返回create_agent()
 def _build_agent(checkpointer):
-    """根据已初始化的 checkpointer 构建 Agent 单例。"""
+    """构建唯一主循环 Agent。"""
     return create_agent(
         model=basic_model,
         tools=AGENT_TOOLS,
         middleware=[
-            inject_long_term_memory,   # 长期记忆注入（pgvector 检索）
-            dynamic_model_selection,   # 动态路由：根据 query 复杂度切换模型
-            handle_tool_errors,        # P1-6：工具异常兜底，防止崩溃
+            inject_runtime_context,
+            dynamic_model_selection,
+            handle_tool_errors,
         ],
-        checkpointer=checkpointer,     # P1-7：多轮对话短期记忆
-        state_schema=AgentState,       # 注册自定义 state，携带 user_id
+        checkpointer=checkpointer,
+        state_schema=AgentState,
         system_prompt=(
-            "你是 InsightAgent，一名以政策通知、招投标公告、申报指南和附件分析为主的智能助手。"
-            "你的默认职责是帮助用户做政策解读、公告检索、条件提取、差异比较和证据整理。"
-            "如果用户询问你的身份，请明确说明你是面向政策与招投标分析的 Agent 平台，同时也兼容公司内部知识查询和时间查询等辅助功能。"
-            "当问题需要文档证据、实时信息或公司内部专属信息时，必须优先调用提供给你的工具，禁止编造。"
+            "你是 InsightAgentPro，一个通用智能体平台中的主执行智能体。"
+            "默认先直接解决问题；当任务需要多步规划、多工具协作、复杂比较/提取/报告时，"
+            "主动调用 run_plan_and_execute。"
         ),
     )
 
-# 决定是内存还是数据库
+
 async def initialize() -> None:
-    """
-    FastAPI lifespan 调用，初始化 Agent 及 Checkpointer。
-    有 POSTGRES_URL 时使用 AsyncPostgresSaver，否则降级到 MemorySaver。
-    """
+    """初始化 Agent 及 checkpointer。"""
     global _agent, _checkpointer, _connection_pool
 
     if settings.POSTGRES_URL:
@@ -115,14 +82,11 @@ async def initialize() -> None:
                 conninfo=settings.POSTGRES_URL,
                 max_size=10,
                 open=False,
-                # langgraph-checkpoint-postgres 的 setup() 内部执行
-                # CREATE INDEX CONCURRENTLY，必须在 autocommit 模式下运行
                 kwargs={"autocommit": True, "prepare_threshold": 0},
             )
             await _connection_pool.open()
 
             _checkpointer = AsyncPostgresSaver(_connection_pool)
-            # 自动建表（checkpoints / checkpoint_writes 等 LangGraph 需要的表）
             await _checkpointer.setup()
             print("✅ [Checkpointer] 已连接 PostgreSQL，使用 AsyncPostgresSaver")
         except Exception as e:
@@ -135,17 +99,17 @@ async def initialize() -> None:
     _agent = _build_agent(_checkpointer)
     print("✅ [Agent] 初始化完成")
 
-# Fastapi结束进程时清理
+
 async def cleanup() -> None:
-    """FastAPI lifespan 退出时关闭连接池。"""
+    """关闭数据库连接池。"""
     global _connection_pool
     if _connection_pool:
         await _connection_pool.close()
         print("🔒 [Agent] 数据库连接池已关闭")
 
-# 兜底用，正常情况下FastAPI await initialize() 已经实例化过了
+
 def _get_agent():
-    """同步获取 Agent 单例，若未初始化则使用 MemorySaver 兜底（开发便利）。"""
+    """同步获取 Agent 单例。"""
     global _agent, _checkpointer
     if _agent is None:
         _checkpointer = MemorySaver()
@@ -153,115 +117,14 @@ def _get_agent():
     return _agent
 
 
-async def _run_plan_and_execute(
-    query: str,
-    thread_id: str,
-    user_id: str,
-    task_mode: str | None = None,
-    metadata_filters: dict[str, Any] | None = None,
-) -> str:
-    state: OrchestratorState = {
-        "messages": [HumanMessage(content=query)],
-        "user_id": user_id,
-        "thread_id": thread_id,
-        "task_mode": task_mode or "qa",
-        "metadata_filters": metadata_filters or {},
-        "is_complex": True,
-    }
-    result = await orchestrator_graph.ainvoke(state)
-    return result.get("final_answer", "复杂任务执行完成，但未生成最终答案。")
-
-
-def _truncate(text: str, limit: int = 120) -> str:
-    clean = " ".join(text.split())
-    return clean if len(clean) <= limit else clean[:limit] + "..."
-
-# 合成答案，固定advanced
-async def _stream_synthesizer(state: OrchestratorState) -> AsyncGenerator[str, None]:
-    prompt = build_synthesizer_prompt(state)
-    yield "✍️ [答案生成] 正在组织最终答案...\n\n"
-    try:
-        async for chunk in advanced_model.astream(prompt):
-            content = getattr(chunk, "content", "")
-            if content:
-                yield content
-    except Exception as exc:
-        fallback = await _run_plan_and_execute(
-            query=str(state["messages"][-1].content) if state.get("messages") else "",
-            thread_id=state.get("thread_id", "default"),
-            user_id=state.get("user_id", ""),
-            task_mode=state.get("task_mode"),
-            metadata_filters=state.get("metadata_filters"),
-        )
-        yield f"\n\n⚠️ [答案生成] 流式生成失败，已回退到一次性生成：{exc}\n\n"
-        yield fallback
-
-
-async def _run_plan_and_execute_stream(
-    query: str,
-    thread_id: str,
-    user_id: str,
-    task_mode: str | None = None,
-    metadata_filters: dict[str, Any] | None = None,
-) -> AsyncGenerator[str, None]:
-    # 先构造 OrchestratorState
-    state: OrchestratorState = {
-        "messages": [HumanMessage(content=query)],
-        "user_id": user_id,
-        "thread_id": thread_id,
-        "task_mode": task_mode or "qa",
-        "metadata_filters": metadata_filters or {},
-        "is_complex": True,
-    }
-    # planner：生成plan流给前端(固定advanced)，结果写回 state["plan"]
-    yield "> 模型来源：DeepSeek API\n\n"
-    yield "📝 [任务规划] 正在生成执行计划...\n"
-    state = await planner_node(state)
-    plan = state.get("plan", [])
-    if plan:
-        plan_lines = "\n".join(f"- {step['step_id']}: {step['goal']}" for step in plan)
-        yield f"✅ [任务规划] 已生成 {len(plan)} 个步骤：\n{plan_lines}\n\n"
-    # executor：遍历step_results流给前段，按plan执行，结果写进step_results
-    yield "🔎 [步骤执行] 正在逐步检索和执行任务...\n"
-    state = await executor_node(state)
-    for result in state.get("step_results", []):
-        yield (
-            f"🛠️ [步骤完成] {result['step_id']} | {result['status']} | "
-            f"{_truncate(result['evidence'])}\n"
-        )
-    yield "\n"
-    # reflection：整理成答案，advanced_model.astream(prompt) 把最终答案流式输出
-    reflection_before = state.get("step_results", [])
-    state = await reflection_node(state)
-    reflection_after = state.get("step_results", [])
-    if reflection_after != reflection_before:
-        yield "🔁 [反思修正] 检测到未完成步骤，已尝试扩大召回或补充证据。\n"
-        for result in reflection_after:
-            if result["status"] in {"partial", "completed"}:
-                yield (
-                    f"📎 [反思结果] {result['step_id']} | {result['status']} | "
-                    f"{_truncate(result['evidence'])}\n"
-                )
-        yield "\n"
-    # synthesizer（固定advanced）
-    async for chunk in _stream_synthesizer(state):
-        yield chunk
-
-
-# 保存长期记忆
 async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
-    """
-    对话结束后，异步地从本轮对话中提取用户关键信息并存入 pgvector。
-    使用 advanced_model 专门做摘要提取，不影响主流程延迟。
-    """
+    """对话结束后，异步提取长期记忆。"""
     if not user_id or not settings.POSTGRES_URL:
         return
     try:
         agent = _get_agent()
         state = await agent.aget_state({"configurable": {"thread_id": thread_id}})
         messages = state.values.get("messages", [])
-
-        # 只取最近 6 条消息（避免 token 超限）
         recent = messages[-6:] if len(messages) > 6 else messages
         conversation = "\n".join(
             f"{'用户' if isinstance(m, HumanMessage) else 'AI'}: {m.content}"
@@ -277,11 +140,7 @@ async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
             f"{conversation}"
         )
         response = await advanced_model.ainvoke(extraction_prompt)
-        facts = [
-            line.strip()
-            for line in response.content.splitlines()
-            if line.strip()
-        ]
+        facts = [line.strip() for line in response.content.splitlines() if line.strip()]
 
         from local_agent_api.core.memory import long_term_memory
         for fact in facts:
@@ -292,62 +151,46 @@ async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
         print(f"⚠️ [长期记忆] 记忆提取失败（{e}），跳过")
 
 
-# ── 流式对话入口 ， router把post转发到执行这里 ───────────────────────────────────────────────────────
 async def get_agent_stream(
     query: str,
     thread_id: str = "default",
     user_id: str = "",
-    task_mode: str | None = None,
+    plan_mode: str | None = None,
     metadata_filters: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    运行智能体，流式返回回答 + 工具调用日志。
-
-    thread_id：同一 ID 的请求共享对话历史（短期记忆）
-    user_id  ：用户唯一标识，用于隔离长期记忆（pgvector）
+    唯一智能体主入口：始终走 ReAct 主循环，必要时由模型自行调用 run_plan_and_execute。
     """
     agent = _get_agent()
-    tool_context_token = set_tool_metadata_filters(metadata_filters)
-
-    # user_id 随 state 输入，inject_long_term_memory 中间件会通过 request.state 读取
+    request = RuntimeRequest(
+        query=query,
+        thread_id=thread_id,
+        user_id=user_id,
+        plan_mode=plan_mode or "auto",
+        metadata_filters=metadata_filters or {},
+    )
+    context_tokens = set_tool_request_context(
+        thread_id=thread_id,
+        user_id=user_id,
+        plan_mode=request.plan_mode,
+        metadata_filters=request.metadata_filters,
+    )
     inputs: AgentState = {
         "messages": [HumanMessage(content=query)],
         "user_id": user_id,
+        "plan_mode": request.plan_mode,
     }
-    # thread_id 进 configurable，给 checkpointer 用
-    config = {"configurable": {"thread_id": thread_id}}
-    
-    # 复杂度判断，走哪个模式
-    should_plan, planning_reason = is_complex_query(query)
-    if task_mode in {"compare", "extract", "report"}: # 若前段传入时强指定
-        should_plan = True
-        planning_reason = f"task_mode={task_mode}"
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": react_recursion_limit(),
+    }
+
     try:
-        if should_plan:
-            # 复杂模式
-            yield f"🧭 [任务路由] 检测到复杂任务，进入 Plan-and-Execute 模式。原因：{planning_reason}\n\n"
-            async for chunk in _run_plan_and_execute_stream(
-                query,
-                thread_id,
-                user_id,
-                task_mode=task_mode,
-                metadata_filters=metadata_filters,
-            ):
-                yield chunk
-            if user_id:
-                # 有userid就调用长期记忆
-                asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
-            return
-        # 简单模式 判断模型
-        simple_model_label = (
-            "DeepSeek API"
-            if _should_use_advanced_model_for_simple_path(query, message_count=1)
-            else "本地 Qwen（Ollama）"
-        )
-        yield f"> 模型来源：{simple_model_label}\n\n"
+        model_label = choose_react_model_label(inputs["messages"], request.plan_mode)
+        yield f"> 模型来源：自动路由（当前起始倾向：{model_label}）\n\n"
+        yield f"🧠 [主循环] 已进入 ReAct 主循环。plan_mode={request.plan_mode}\n\n"
 
         stream_had_content = False
-        # 简单模式 流式主循环，读 LangChain 事件流
         async for event in agent.astream_events(inputs, config=config, version="v2"):
             kind = event["event"]
 
@@ -359,14 +202,16 @@ async def get_agent_stream(
 
             elif kind == "on_tool_start":
                 tool_name = event["name"]
-                yield f"\n\n🛠️ [Agent思考] 决定调用工具：【{tool_name}】...\n"
+                yield f"\n\n🛠️ [工具调用] 决定调用工具：【{tool_name}】...\n"
 
             elif kind == "on_tool_end":
                 tool_name = event["name"]
-                yield f"\n✅ [Agent执行] 工具【{tool_name}】返回了结果，正在整理答案...\n\n"
+                if tool_name == "run_plan_and_execute":
+                    for line in drain_tool_trace():
+                        yield f"{line}\n"
+                yield f"\n✅ [工具完成] 工具【{tool_name}】执行完成，正在继续推理...\n\n"
 
-        # 流结束后，异步后台提取存入记忆（不阻塞响应）
         if stream_had_content and user_id:
             asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
     finally:
-        reset_tool_metadata_filters(tool_context_token)
+        reset_tool_request_context(context_tokens)

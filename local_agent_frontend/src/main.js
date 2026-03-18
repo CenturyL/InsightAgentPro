@@ -13,7 +13,7 @@ function createThreadId() {
 const defaultThreadId = createThreadId();
 
 const state = {
-  apiBase: localStorage.getItem("agent-api-base") || "/api/v1",
+  apiBase: localStorage.getItem("agent-api-base") || "/api/v2",
   threadId: localStorage.getItem("agent-thread-id") || defaultThreadId,
   messages: [],
   latestUploadedSource: null,
@@ -48,8 +48,8 @@ app.innerHTML = `
       <div class="brand">
         <div class="brand-mark">IA</div>
         <div>
-          <p class="eyebrow">Policy And Tender Agent</p>
-          <h1>InsightAgent</h1>
+          <p class="eyebrow">General Agent Runtime</p>
+          <h1>InsightAgentPro</h1>
         </div>
         <button id="closeRail" class="ghost rail-close">关闭</button>
       </div>
@@ -57,7 +57,7 @@ app.innerHTML = `
       <div class="stack">
         <label class="field">
           <span>API Base</span>
-          <input id="apiBase" value="${state.apiBase}" placeholder="/api/v1" />
+          <input id="apiBase" value="${state.apiBase}" placeholder="/api/v2" />
         </label>
         <label class="field">
           <span>Thread ID</span>
@@ -75,11 +75,11 @@ app.innerHTML = `
       <div class="mini-metrics compact-metrics">
         <div class="mini-card">
           <span>Chat Mode</span>
-          <strong>ReAct + Planner</strong>
+          <strong>ReAct + PAE Tool</strong>
         </div>
         <div class="mini-card">
-          <span>Retrieval</span>
-          <strong>Hybrid + Rerank</strong>
+          <span>Platform</span>
+          <strong>Tools + Skills + Memory</strong>
         </div>
       </div>
 
@@ -106,8 +106,8 @@ app.innerHTML = `
       <header class="workspace-header">
         <div>
           <p class="eyebrow">Agent Console</p>
-          <h2>InsightAgent</h2>
-          <p class="hero-text">面向政策通知、招投标公告与本地知识资料分析的多模式 Agent 工作台。</p>
+          <h2>InsightAgentPro</h2>
+          <p class="hero-text">统一 ReAct 主循环、计划执行、工具调用、检索增强与记忆系统的通用智能体工作台。</p>
         </div>
       </header>
 
@@ -146,17 +146,24 @@ app.innerHTML = `
               <p class="eyebrow">Prompt</p>
               <strong>提问</strong>
             </div>
-            <textarea id="query" placeholder="输入问题，例如：请比较上海浦东新区两份政策通知在支持对象和支持方向上的差异，并整理成要点。"></textarea>
+            <textarea id="query" placeholder="输入问题，例如：先联网搜索最新公开信息，再结合本地知识给出一份结构化对比结论。"></textarea>
+            <label class="field slim grow">
+              <span>Plan Mode</span>
+              <select id="planMode">
+                <option value="auto">auto</option>
+                <option value="compare">compare</option>
+                <option value="extract">extract</option>
+                <option value="report">report</option>
+                <option value="research">research</option>
+                <option value="strict_plan">strict_plan</option>
+              </select>
+            </label>
             <label class="field slim grow">
               <span>Metadata Filters (JSON)</span>
               <input id="metadataFilters" placeholder='{"doc_category":"policy","region":"上海"}' />
             </label>
             <div class="live-status" id="agentStatus">等待发送请求...</div>
             <div class="composer-actions">
-              <label id="forceComplexToggle" class="ghost toggle-chip">
-                <input id="forceComplex" type="checkbox" />
-                <span>强制复杂模式</span>
-              </label>
               <button id="sendChat">发送</button>
             </div>
           </section>
@@ -262,11 +269,6 @@ const $ = (selector) => document.querySelector(selector);
 
 const apiBaseInput = $("#apiBase");
 const threadInput = $("#threadId");
-const forceComplexInput = $("#forceComplex");
-
-function syncForceComplexToggle() {
-  $("#forceComplexToggle")?.classList.toggle("is-active", forceComplexInput.checked);
-}
 
 function setRailOpen(open) {
   state.railOpen = open;
@@ -626,7 +628,7 @@ async function requestJson(path, options = {}) {
 }
 
 apiBaseInput.addEventListener("change", () => {
-  state.apiBase = apiBaseInput.value.trim() || "/api/v1";
+  state.apiBase = apiBaseInput.value.trim() || "/api/v2";
   localStorage.setItem("agent-api-base", state.apiBase);
 });
 
@@ -640,8 +642,6 @@ $("#regenThread").addEventListener("click", () => {
   threadInput.value = state.threadId;
   localStorage.setItem("agent-thread-id", state.threadId);
 });
-
-forceComplexInput.addEventListener("change", syncForceComplexToggle);
 
 $("#clearChat").addEventListener("click", () => {
   state.messages = [];
@@ -682,7 +682,7 @@ async function submitChat() {
         query,
         thread_id: state.threadId,
         user_id: $("#userId").value.trim(),
-        task_mode: $("#forceComplex").checked ? "compare" : null,
+        plan_mode: $("#planMode").value || "auto",
         metadata_filters: metadataFilters,
       }),
     });
@@ -889,4 +889,3 @@ renderMessages();
 syncDashboard();
 setRailOpen(false);
 setActiveEvalAction(null);
-syncForceComplexToggle();

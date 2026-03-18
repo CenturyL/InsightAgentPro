@@ -19,7 +19,7 @@ from local_agent_api.services.agent_service import get_agent_stream
 class BenchmarkQueryConfig(BaseModel):
     """一次 benchmark 请求的配置定义。"""
     query: str
-    task_mode: str | None = None
+    plan_mode: str | None = None
     metadata_filters: dict[str, Any] | None = None
 
 
@@ -53,7 +53,7 @@ async def _run_agent_once(config: BenchmarkQueryConfig) -> tuple[float, int]:
     chunks = []
     async for chunk in get_agent_stream(
         config.query,
-        task_mode=config.task_mode,
+        plan_mode=config.plan_mode,
         metadata_filters=config.metadata_filters,
     ):
         chunks.append(chunk)

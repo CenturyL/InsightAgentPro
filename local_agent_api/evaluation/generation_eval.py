@@ -124,14 +124,14 @@ def load_generation_eval_dataset(dataset_path: str) -> list[GenerationEvalItem]:
 
 async def _collect_agent_answer(
     query: str,
-    task_mode: str | None = None,
+    plan_mode: str | None = None,
     metadata_filters: dict[str, Any] | None = None,
 ) -> str:
     """完整跑一遍真实 agent 流式输出，并把 chunk 合并成最终答案。"""
     chunks = []
     async for chunk in get_agent_stream(
         query,
-        task_mode=task_mode,
+        plan_mode=plan_mode,
         metadata_filters=metadata_filters,
     ):
         chunks.append(chunk)
@@ -184,7 +184,7 @@ async def run_generation_eval(dataset_path: str, candidate_k: int = 15) -> Gener
         )
         model_answer = await _collect_agent_answer(
             item.query,
-            task_mode=item.task_mode,
+            plan_mode=item.task_mode,
             metadata_filters=item.metadata_filters,
         )
         judge_result = await _judge_generation(

@@ -20,15 +20,20 @@ PLANNER_PROMPT = """你是一个复杂任务规划器。请根据用户目标，
    step_id, goal, reason, required_capability, expected_output, status
 4. status 固定填 "pending"
 5. 步骤要具体，可直接执行，避免空泛措辞
+6. required_capability 必须优先从以下能力中选择：
+   rag_search, rag_search_uploaded, web_search, search_long_term_memory, get_current_time, analysis, synthesis
 
 用户目标：
 {query}
 
-任务模式：
-{task_mode}
+计划模式：
+{plan_mode}
 
 显式过滤条件：
 {metadata_filters}
+
+补充上下文（人格 / skill / 记忆 / 提示词）：
+{runtime_context}
 """
 
 
@@ -51,7 +56,7 @@ def _fallback_plan(query: str) -> list[PlanStep]:
             "step_id": "step_1",
             "goal": "定位与问题最相关的政策或招投标资料",
             "reason": "先确定证据来源，避免后续分析无依据",
-            "required_capability": "retrieval",
+            "required_capability": "rag_search",
             "expected_output": "相关文档片段和核心来源列表",
             "status": "pending",
         },
@@ -59,7 +64,7 @@ def _fallback_plan(query: str) -> list[PlanStep]:
             "step_id": "step_2",
             "goal": "抽取能够回答问题的关键字段或关键信息",
             "reason": "将非结构化内容转成可分析的中间结果",
-            "required_capability": "extraction",
+            "required_capability": "analysis",
             "expected_output": "按主题整理的关键事实",
             "status": "pending",
         },
@@ -120,8 +125,9 @@ async def planner_node(state: OrchestratorState) -> OrchestratorState:
     # 组装prompt
     prompt = PLANNER_PROMPT.format(
         query=query,
-        task_mode=state.get("task_mode", "qa"),
+        plan_mode=state.get("plan_mode", "auto"),
         metadata_filters=state.get("metadata_filters", {}),
+        runtime_context=state.get("runtime_system_prompt", "无"),
     )
 
     try:

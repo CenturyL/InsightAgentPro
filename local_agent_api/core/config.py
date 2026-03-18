@@ -10,6 +10,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 class Settings(BaseSettings):
     # 默认配置：如果环境变量里没有设置，就用这些默认值
     PROJECT_NAME: str = "Local Knowledge Agent API"
+    WORKSPACE_ROOT: str = str(_PROJECT_ROOT.parent)
     # 基础模型提供方：支持 ollama 或 openai_compatible（vLLM / LM Studio / OneAPI 等）
     BASIC_MODEL_PROVIDER: str = "ollama"
     BASIC_MODEL_BASE_URL: str = "http://10.144.144.7:11434"
@@ -38,6 +39,9 @@ class Settings(BaseSettings):
     # BAAI (智源研究院) 的 bge-reranker 目前是开源中最顶尖的中文重排模型之一
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"
     RERANKER_DEVICE: str = "auto"
+    REACT_MAX_TOOL_CALLS: int = 10
+    REACT_MAX_NO_PROGRESS_CALLS: int = 3
+    PAE_MAX_CALLS_PER_REQUEST: int = 1
 
     # ── 长期记忆 & 持久化 Checkpointer（可选）────────────────────────────────
     # 格式：postgresql://用户名:密码@主机:端口/数据库名

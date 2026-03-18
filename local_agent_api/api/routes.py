@@ -50,10 +50,10 @@ async def chat_stream(request: ChatRequest):
     return StreamingResponse(generate_chat(), media_type="text/plain")
 
 # 动态智能体 Agent 接口
-@router.post("/chat/agent", summary="动态智能体 Agent 接口（含 RAG + 工具 + 多轮记忆）")
+@router.post("/chat/agent", summary="通用智能体 Agent 接口（ReAct 主循环 + Tools + PAE）")
 async def chat_agent_endpoint(request: ChatRequest):
     """
-    统一智能体入口：自动在 Qwen / DeepSeek 间路由，调度知识库检索或计算工具。
+    统一智能体入口：默认走 ReAct 主循环，必要时由模型主动调用 PAE 工具。
     - 传入 thread_id 可保持多轮对话记忆（相同 ID 自动拼接历史）
     - 不传 thread_id 则每次独立会话
     - RAG 检索已收敛至 search_company_rules 工具，无需单独调用 /chat/rag
@@ -64,11 +64,12 @@ async def chat_agent_endpoint(request: ChatRequest):
     user_id = request.user_id or ""
 
     async def generate_agent_output():
+        plan_mode = request.plan_mode or request.task_mode
         async for chunk in get_agent_stream(
                 request.query,
                 thread_id=thread_id,
                 user_id=user_id,
-                task_mode=request.task_mode,
+                plan_mode=plan_mode,
                 metadata_filters=request.metadata_filters,
         ):
             yield chunk
