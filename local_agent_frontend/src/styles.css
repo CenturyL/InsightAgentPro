@@ -768,7 +768,7 @@ button {
   .chat-column {
     grid-column: 1;
     height: 100vh;
-    grid-template-rows: calc(52px + env(safe-area-inset-top, 0px)) minmax(0, 1fr) auto;
+    grid-template-rows: calc(74px + env(safe-area-inset-top, 0px)) minmax(0, 1fr) auto;
   }
 
   .sidebar,
@@ -811,15 +811,15 @@ button {
   }
 
   .chat-header {
-    padding: env(safe-area-inset-top, 0px) 14px 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 14px 0;
   }
 
   .compact-header {
-    min-height: calc(52px + env(safe-area-inset-top, 0px));
+    min-height: calc(74px + env(safe-area-inset-top, 0px));
   }
 
   .chat-header-row {
-    min-height: 52px;
+    min-height: 60px;
   }
 
   .drawer-overlay {
