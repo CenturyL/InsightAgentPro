@@ -1,158 +1,151 @@
-# InsightAgent
+# InsightAgentPro
 
-一个面向政策通知、招投标公告与本地资料分析的多模式 Agent 平台。项目提供：
+InsightAgentPro is a general agent runtime platform built for real task execution rather than single-path document Q&A. It combines a ReAct main loop, a Plan-and-Execute workflow, unified tool registration, editable runtime context, and hybrid retrieval into one full-stack system with a ChatGPT-style web UI.
 
-- `ReAct + Plan-and-Execute` 混合执行模式
-- 本地知识库上传、结构化切块、混合检索与重排
-- 长期记忆与短期会话记忆
-- 离线评估、baseline 对比与系统 benchmark
-- 前端工作台与 ECS + 本地后端混合部署
+## What It Does
 
-## 功能概览
+- Runs a ReAct-based primary agent loop for normal interaction and tool use
+- Exposes Plan-and-Execute as an advanced capability for multi-step tasks
+- Supports local and cloud model selection from the frontend
+- Combines retrieval, web search, memory, and workflow execution in one runtime
+- Provides editable persona, markdown memory, and runtime assets from the UI
+- Streams tool calls, reasoning traces, and workflow progress to a runtime panel
 
-- **简单模式**
-  - 走 LangChain tool-calling agent
-  - 支持知识检索、时间查询、长期记忆注入与动态模型路由
-- **复杂模式**
-  - 走 `planner -> executor -> reflection -> synthesizer`
-  - 适合多文档比较、字段提取、结构化汇总、报告生成
-- **RAG 能力**
-  - 支持 `TXT / MD / PDF / HTML / CSV / TSV / PNG / JPG / JPEG / WEBP`
-  - 图片先 OCR，再进入知识库
-  - 当前采用 `dense + lexical + rerank + metadata filter + citation`
-  - 已实现 `child 检索 + parent 回填`
-- **记忆能力**
-  - 短期记忆：`thread_id + checkpointer`
-  - 长期记忆：`user_id + PostgreSQL/pgvector`
-- **评估能力**
-  - Retrieval Eval
-  - Baseline Compare
-  - Generation Eval
-  - System Benchmark
-  - 一键重建测试环境
+## Core Capabilities
 
-## 仓库结构
+### 1. Agent Runtime
 
-```text
-langchainPro/
-├── local_agent_api/          # FastAPI 后端、Agent、RAG、评估逻辑
-│   ├── agents/               # planner / executor / reflection / orchestrator
-│   ├── api/                  # HTTP 路由与 schema
-│   ├── core/                 # 配置、模型、记忆、中间件
-│   ├── retrieval/            # 文档入库、检索、citation
-│   ├── evaluation/           # 离线测评与 benchmark
-│   ├── services/             # 聊天主流程、tools、评估 service
-│   └── data/                 # 测试语料与评估数据集（运行时向量库已忽略）
-├── local_agent_frontend/     # Vite 前端工作台
-├── test/                     # 测试脚本
-└── 文档/                     # 设计与学习笔记
-```
+- ReAct is the default control loop
+- Plan-and-Execute can be auto-triggered or manually forced with `plan_mode`
+- Runtime context is assembled before model calls and includes:
+  - persona
+  - markdown memory
+  - selected skills
+  - long-term memory
+  - MCP context
+  - tool guidance
+  - complexity and recommended action
 
-## 核心架构
+### 2. Unified Tool System
 
-### 聊天主流程
+The system registers multiple capabilities as tools instead of hardcoding them into a single path:
 
-- 前端请求进入 FastAPI `/api/v1/chat/agent`
-- 服务层根据 query 和 `task_mode` 判断走简单或复杂路径
-- 简单路径：
-  - `create_agent + middleware + tools`
-- 复杂路径：
-  - `planner -> executor -> reflection -> synthesizer`
+- `rag_search`
+- `rag_search_uploaded`
+- `web_search`
+- `search_long_term_memory`
+- `get_current_time`
+- `run_plan_and_execute`
 
-### RAG 主链
+This lets the main loop and the workflow share the same capability surface.
 
-- 上传文件后：
-  - 解析原文
-  - 结构化 block 切分
-  - 生成 parent / child
-  - child 存入 Chroma
-  - parent 存入本地 `parent_store`
-- 查询时：
-  - child 检索
-  - `parent_id` 回填 parent
-  - 返回 parent 优先的 `context_text` 与 citation
+### 3. Retrieval and Memory
 
-### 记忆设计
+- Hybrid retrieval with vector recall, keyword补召回, metadata filtering, and reranking
+- Citation-oriented output
+- Uploaded document priority search
+- Chroma-backed document index
+- PostgreSQL + pgvector for long-term memory
+- Thread-based short-term conversation continuity
+- Markdown memory for explicit, editable workspace memory
 
-- `thread_id`：短期会话线程标识
-- `user_id`：长期记忆隔离标识
-- 配置 `POSTGRES_URL` 时：
-  - LangGraph checkpointer 使用 PostgreSQL
-  - 长期记忆使用 pgvector
-- 未配置时：
-  - 自动降级为进程内 MemorySaver
+### 4. Runtime Assets
 
-## 主要技术栈
+The frontend can read and update runtime assets:
 
-- **后端**：FastAPI, LangChain, LangGraph
-- **模型**：Ollama / Qwen, DeepSeek API
-- **检索**：Chroma, BGE Reranker, pgvector
-- **前端**：Vite, Vanilla JS
-- **部署**：ECS + macOS backend + Windows Ollama + EasyTier + Nginx
+- `persona/AGENTS.md`
+- `persona/SOUL.md`
+- `memory/MEMORY.md`
+- `skills/*.md`
 
-## 本地开发
+These assets are not only editable files; they are used in runtime prompt assembly.
 
-### 1. 后端
+### 5. Deployment
 
-推荐 Python 3.11，并在 `local_agent_api/.env` 中配置必要环境变量。
+The project supports hybrid deployment:
 
-示例：
+- public entry via ECS
+- backend services on Ubuntu
+- local Ollama inference on GPU server
+- cloud APIs for stronger planning/synthesis stages
+- frontend served separately through Vite during development
 
-```env
-DEEPSEEK_API_KEY=your_key
-POSTGRES_URL=postgresql://user:password@host:5432/dbname
-EMBEDDING_DEVICE=auto
-RERANKER_DEVICE=auto
-```
+## Architecture
 
-启动：
+### Backend
+
+- `local_agent_api/services/agent_service.py`
+  - main streaming agent entry
+- `local_agent_api/runtime/`
+  - runtime context, prompt assembly, workflow orchestration, tool registry
+- `local_agent_api/agents/`
+  - planner, executor, reflection, synthesizer
+- `local_agent_api/retrieval/`
+  - ingestion and retrieval pipeline
+
+### Frontend
+
+- React + TypeScript + Vite
+- studio-style three-panel UI:
+  - left: runtime assets and knowledge controls
+  - center: chat area
+  - right: agent run / trace panel
+
+## Tech Stack
+
+- FastAPI
+- LangChain
+- LangGraph
+- PostgreSQL
+- pgvector
+- Chroma
+- BGE Reranker
+- Ollama
+- DeepSeek API
+- MiniMax API
+- React
+- TypeScript
+- Vite
+
+## Running Locally
+
+### Backend
+
+1. Create and activate your Python environment
+2. Configure `local_agent_api/.env`
+3. Start the API:
 
 ```bash
-cd /Users/century/code/agent/langchainPro
-conda run --no-capture-output -n agent uvicorn local_agent_api.main:app --host 0.0.0.0 --port 8000 --log-level info
+cd local_agent_api
+uvicorn local_agent_api.main:app --reload
 ```
 
-### 2. 前端
+### Frontend
 
 ```bash
-cd /Users/century/code/agent/langchainPro/local_agent_frontend
+cd local_agent_frontend
 npm install
-npm run dev -- --host 127.0.0.1 --port 4173
+npm run dev
 ```
 
-## 部署说明
+Default development URLs:
 
-当前线上采用：
+- Frontend: `http://127.0.0.1:5173`
+- Backend: `http://127.0.0.1:8000`
 
-- **ECS**
-  - 承载 Nginx 与静态前端
-  - 作为公网入口
-- **macOS**
-  - 承载真实 FastAPI 后端
-- **Windows**
-  - 承载本地 Ollama / Qwen
-- **EasyTier**
-  - 打通三台机器内网访问
+## Runtime Asset APIs
 
-Nginx 负责：
+- `GET /api/v2/runtime/assets`
+- `PUT /api/v2/runtime/assets`
 
-- 提供前端静态资源
-- 将 `/api/*` 请求反向代理到 macOS 后端
-- 保持流式响应能力
+## Project Status
 
-## 评估体系
+InsightAgentPro is an active engineering project focused on:
 
-- **Retrieval Eval**
-  - 测检索质量：`Precision@K / Recall@K / MRR / nDCG`
-- **Baseline Compare**
-  - 对比 `dense_only / dense_rerank / hybrid_only / hybrid_rerank`
-- **Generation Eval**
-  - 评估 `answer_relevance / faithfulness / citation_accuracy / keyword_coverage`
-- **System Benchmark**
-  - 评估 retrieval latency、simple/complex request latency、peak memory
+- general agent runtime design
+- tool-centric execution
+- workflow orchestration
+- memory integration
+- model-flexible deployment
 
-## 注意事项
-
-- `.env`、本地向量库、构建产物与 `node_modules` 不应提交到仓库
-- 后端真实运行在本机时，修改后端代码后需要手动重启本地 `uvicorn`
-- 如果 `.env` 曾经进入 Git 历史，建议轮换其中真实密钥
+It is intended as a practical full-stack agent system rather than a demo-only RAG app.

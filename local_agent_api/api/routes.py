@@ -7,22 +7,16 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
 from local_agent_api.api.schemas import (
     ChatRequest,
-    GenerationEvalRequest,
-    RebuildTestEnvRequest,
-    RetrievalEvalRequest,
-    SystemBenchmarkRequest,
+    RuntimeAssetsResponse,
+    RuntimeAssetsUpdateRequest,
 )
 from langchain_core.messages import HumanMessage
 from local_agent_api.retrieval.pipeline import process_and_store_document
-from local_agent_api.services.eval_service import (
-    run_generation_eval_job,
-    run_retrieval_compare_job,
-    run_retrieval_eval_job,
-    run_system_benchmark_job,
-)
 from local_agent_api.services.agent_service import get_agent_stream
-from local_agent_api.services.test_env_service import rebuild_test_environment
-from local_agent_api.core.config import settings
+from local_agent_api.services.runtime_assets_service import (
+    load_runtime_assets,
+    save_runtime_assets,
+)
 from local_agent_api.core.llm import create_basic_model
 
 router = APIRouter()
@@ -70,88 +64,12 @@ async def chat_agent_endpoint(request: ChatRequest):
                 thread_id=thread_id,
                 user_id=user_id,
                 plan_mode=plan_mode,
+                model_choice=request.model_choice or "local_qwen",
                 metadata_filters=request.metadata_filters,
         ):
             yield chunk
 
     return StreamingResponse(generate_agent_output(), media_type="text/plain")
-
-
-# eval接口
-@router.post("/eval/retrieval", summary="运行离线检索评估")
-async def run_retrieval_eval_endpoint(request: RetrievalEvalRequest):
-    """离线检索评估接口封装。"""
-    try:
-        metrics = run_retrieval_eval_job(
-            dataset_path=request.dataset_path,
-            top_k=request.top_k,
-            candidate_k=request.candidate_k,
-            strategy=request.strategy,
-        )
-        return {"code": 200, "message": "评估完成", "metrics": metrics.model_dump()}
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"检索评估失败: {exc}")
-
-
-# 对比接口
-@router.post("/eval/retrieval/compare", summary="运行检索 baseline 对比")
-async def run_retrieval_compare_endpoint(request: RetrievalEvalRequest):
-    """检索 baseline 对比接口封装。"""
-    try:
-        report = run_retrieval_compare_job(
-            dataset_path=request.dataset_path,
-            top_k=request.top_k,
-            candidate_k=request.candidate_k,
-        )
-        return {"code": 200, "message": "对比完成", "report": report.model_dump()}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"检索对比失败: {exc}")
-
-
-# 生成评估接口
-@router.post("/eval/generation", summary="运行离线生成评估")
-async def run_generation_eval_endpoint(request: GenerationEvalRequest):
-    """生成质量评估接口封装。"""
-    try:
-        metrics = await run_generation_eval_job(
-            dataset_path=request.dataset_path,
-            candidate_k=request.candidate_k,
-        )
-        return {"code": 200, "message": "评估完成", "metrics": metrics.model_dump()}
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"生成评估失败: {exc}")
-
-
-# 重建测评环境接口
-@router.post("/testing/rebuild", summary="一键重建本地测试环境")
-async def rebuild_test_env_endpoint(request: RebuildTestEnvRequest):
-    """重建前端演示用测试语料和 benchmark 数据集。"""
-    try:
-        result = rebuild_test_environment(
-            force_download=request.force_download,
-            run_retrieval_eval=request.run_retrieval_eval,
-        )
-        return {"code": 200, "message": "测试环境重建完成", "result": result}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"测试环境重建失败: {exc}")
-
-
-# benchmark接口
-@router.post("/eval/benchmark", summary="运行系统 benchmark")
-async def run_system_benchmark_endpoint(request: SystemBenchmarkRequest):
-    """运行系统级 benchmark，测默认场景下的端到端时延。"""
-    try:
-        metrics = await run_system_benchmark_job(
-            retrieval_dataset_path=request.retrieval_dataset_path,
-            candidate_k=request.candidate_k,
-        )
-        return {"code": 200, "message": "benchmark 完成", "metrics": metrics.model_dump()}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"benchmark 失败: {exc}")
 
 # 上传文件接口
 @router.post("/knowledge/upload", summary="上传文件并录入本地知识库")
@@ -189,3 +107,20 @@ async def upload_knowledge(file: UploadFile = File(...)):
         # 3. 擦屁股：存进向量库后删掉服务器上的临时原文件
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+
+@router.get("/runtime/assets", response_model=RuntimeAssetsResponse, summary="读取运行时资产")
+async def get_runtime_assets():
+    """读取 persona / markdown memory / skills，供前端编辑。"""
+    return load_runtime_assets()
+
+
+@router.put("/runtime/assets", response_model=RuntimeAssetsResponse, summary="更新运行时资产")
+async def update_runtime_assets(request: RuntimeAssetsUpdateRequest):
+    """更新 persona / markdown memory / skills。"""
+    return save_runtime_assets(
+        agents_md=request.agents_md,
+        soul_md=request.soul_md,
+        memory_md=request.memory_md,
+        skills=[skill.model_dump() for skill in request.skills],
+    )

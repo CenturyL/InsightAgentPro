@@ -19,6 +19,10 @@ local_agent_api/scripts/local_agent_api/data/chroma_db/
 local_agent_frontend/node_modules/
 local_agent_frontend/dist/
 local_agent_frontend/.vite/
+local_agent_frontend/tsconfig.tsbuildinfo
+
+# Private learning notes
+学习文档/
 
 # OS / editor noise
 *.swp

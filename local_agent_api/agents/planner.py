@@ -8,7 +8,7 @@ import re
 from pydantic import BaseModel, Field, TypeAdapter
 
 from local_agent_api.agents.state import OrchestratorState, PlanStep
-from local_agent_api.core.llm import advanced_model
+from local_agent_api.core.llm import get_model_by_choice
 
 
 PLANNER_PROMPT = """你是一个复杂任务规划器。请根据用户目标，输出一个简洁、可执行的计划。
@@ -54,10 +54,10 @@ def _fallback_plan(query: str) -> list[PlanStep]:
     return [
         {
             "step_id": "step_1",
-            "goal": "定位与问题最相关的政策或招投标资料",
-            "reason": "先确定证据来源，避免后续分析无依据",
+            "goal": "定位与问题最相关的通用知识、文档证据或外部信息源",
+            "reason": "先确定证据基础，避免后续分析脱离事实依据",
             "required_capability": "rag_search",
-            "expected_output": "相关文档片段和核心来源列表",
+            "expected_output": "相关证据片段、来源和可用上下文摘要",
             "status": "pending",
         },
         {
@@ -71,7 +71,7 @@ def _fallback_plan(query: str) -> list[PlanStep]:
         {
             "step_id": "step_3",
             "goal": f"围绕用户问题完成综合分析：{query[:50]}",
-            "reason": "结合证据形成最终回答",
+            "reason": "结合证据形成最终回答或方案",
             "required_capability": "synthesis",
             "expected_output": "结构化最终答案与结论",
             "status": "pending",
@@ -132,7 +132,8 @@ async def planner_node(state: OrchestratorState) -> OrchestratorState:
 
     try:
         # 拿回复&标准化
-        response = await advanced_model.ainvoke(prompt)
+        model = get_model_by_choice(state.get("model_choice", "deepseek"))
+        response = await model.ainvoke(prompt)
         raw = response.content.strip()
         normalized = _normalize_plan(raw, query)
     except Exception:

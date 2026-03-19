@@ -12,13 +12,14 @@ from langchain_core.tools import tool
 from local_agent_api.core.config import settings
 from local_agent_api.retrieval.pipeline import retrieve_knowledge_bundle
 from local_agent_api.runtime.memory_bridge import search_long_term_memory_text
-from local_agent_api.runtime.workflow import run_plan_and_execute_once
 from local_agent_api.services.tool_context import (
     append_tool_trace,
+    get_tool_model_choice,
     get_tool_metadata_filters,
     get_tool_plan_mode,
     get_tool_thread_id,
     get_tool_user_id,
+    is_in_pae,
 )
 
 
@@ -148,15 +149,27 @@ def _get_current_time_impl(timezone: str = "Asia/Shanghai") -> tuple[str, list]:
 
 
 async def _run_plan_and_execute_impl(query: str) -> tuple[str, dict[str, Any]]:
+    if is_in_pae():
+        return "当前已在计划执行流程中，禁止递归再次调用 run_plan_and_execute。", {
+            "mode": "plan_and_execute",
+            "plan": [],
+            "step_results": [],
+            "citations": [],
+            "trace": [],
+            "final_answer": "当前已在计划执行流程中，禁止递归再次调用 run_plan_and_execute。",
+        }
     thread_id = get_tool_thread_id() or "default"
     user_id = get_tool_user_id() or ""
     plan_mode = get_tool_plan_mode()
+    model_choice = get_tool_model_choice()
     metadata_filters = get_tool_metadata_filters()
+    from local_agent_api.runtime.workflow import run_plan_and_execute_once
     result = await run_plan_and_execute_once(
         query=query,
         thread_id=thread_id,
         user_id=user_id,
         plan_mode=plan_mode,
+        model_choice=model_choice,
         metadata_filters=metadata_filters,
         trace_sink=append_tool_trace,
     )
@@ -165,7 +178,7 @@ async def _run_plan_and_execute_impl(query: str) -> tuple[str, dict[str, Any]]:
 
 @tool(response_format="content_and_artifact")
 async def run_plan_and_execute(query: str) -> tuple[str, dict[str, Any]]:
-    """高级计划执行工具。适用于多步规划、多文档比较、复杂提取、长链分析和报告生成。"""
+    """复杂任务默认首选工具。遇到比较、提取多个字段、报告/方案生成、多步研究、需要先检索再分析再汇总时，必须优先调用本工具，而不是直接回答。"""
     return await _run_plan_and_execute_impl(query=query)
 
 

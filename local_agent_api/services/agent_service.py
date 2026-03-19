@@ -4,13 +4,13 @@ agent_service.py — 智能体服务
 V2 设计：
 1. 唯一主循环：ReAct
 2. PAE 作为高级工具 run_plan_and_execute 被主循环调用
-3. runtime 统一提供动态 prompt、模型路由、工具上下文
+3. runtime 统一提供动态 prompt、硬触发 PAE、工具上下文
 4. thread_id 仍驱动短期记忆，user_id 驱动长期记忆写回
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator
 from typing_extensions import TypedDict
 
 from langchain.agents import create_agent
@@ -18,20 +18,21 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from local_agent_api.core.config import settings
-from local_agent_api.core.llm import basic_model, advanced_model
+from local_agent_api.core.llm import deepseek_model, get_model_label, local_model
 from local_agent_api.core.middleware import (
-    dynamic_model_selection,
+    bind_selected_model,
     handle_tool_errors,
     inject_runtime_context,
 )
 from local_agent_api.runtime.engine import (
     RuntimeRequest,
-    build_runtime_prompt,
-    choose_react_model_label,
     react_recursion_limit,
+    should_force_pae,
 )
+from local_agent_api.runtime.workflow import run_plan_and_execute_once, stream_plan_and_execute
 from local_agent_api.services.tool_context import (
     drain_tool_trace,
+    get_tool_trace_queue,
     reset_tool_request_context,
     set_tool_request_context,
 )
@@ -42,6 +43,7 @@ class AgentState(TypedDict):
     messages: list[BaseMessage]
     user_id: str
     plan_mode: str
+    model_choice: str
 
 
 _agent = None
@@ -49,22 +51,40 @@ _checkpointer = None
 _connection_pool = None
 
 
+def _should_suppress_stream_chunk(chunk) -> bool:
+    tool_call_chunks = getattr(chunk, "tool_call_chunks", None)
+    if tool_call_chunks:
+        return True
+    chunk_content = getattr(chunk, "content", None)
+    if not isinstance(chunk_content, str):
+        return False
+    stripped = chunk_content.strip()
+    if not stripped:
+        return False
+    if stripped in {"[", "]", "{", "}", ":", ","}:
+        return True
+    if any(marker in stripped for marker in ('"step_id"', '"required_capability"', '"expected_output"', '"status"')):
+        return True
+    return False
+
+
 def _build_agent(checkpointer):
     """构建唯一主循环 Agent。"""
     return create_agent(
-        model=basic_model,
+        model=local_model,
         tools=AGENT_TOOLS,
         middleware=[
             inject_runtime_context,
-            dynamic_model_selection,
+            bind_selected_model,
             handle_tool_errors,
         ],
         checkpointer=checkpointer,
         state_schema=AgentState,
         system_prompt=(
             "你是 InsightAgentPro，一个通用智能体平台中的主执行智能体。"
-            "默认先直接解决问题；当任务需要多步规划、多工具协作、复杂比较/提取/报告时，"
-            "主动调用 run_plan_and_execute。"
+            "默认在 ReAct 主循环中工作。"
+            "如果任务涉及比较、提取多个字段、生成报告/方案、多步研究、需要多工具协作、"
+            "或你无法确定单轮工具调用就能稳定完成，则必须先调用 run_plan_and_execute，禁止直接尝试一次性回答。"
         ),
     )
 
@@ -139,7 +159,7 @@ async def _extract_and_save_memories(thread_id: str, user_id: str) -> None:
             "每行一条，只输出信息本身，不要编号或多余说明，无有效信息则输出空。\n\n"
             f"{conversation}"
         )
-        response = await advanced_model.ainvoke(extraction_prompt)
+        response = await deepseek_model.ainvoke(extraction_prompt)
         facts = [line.strip() for line in response.content.splitlines() if line.strip()]
 
         from local_agent_api.core.memory import long_term_memory
@@ -156,6 +176,7 @@ async def get_agent_stream(
     thread_id: str = "default",
     user_id: str = "",
     plan_mode: str | None = None,
+    model_choice: str = "local_qwen",
     metadata_filters: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
@@ -167,18 +188,22 @@ async def get_agent_stream(
         thread_id=thread_id,
         user_id=user_id,
         plan_mode=plan_mode or "auto",
+        model_choice=model_choice,
         metadata_filters=metadata_filters or {},
     )
     context_tokens = set_tool_request_context(
         thread_id=thread_id,
         user_id=user_id,
         plan_mode=request.plan_mode,
+        model_choice=request.model_choice,
         metadata_filters=request.metadata_filters,
     )
+    tool_trace_queue = get_tool_trace_queue(context_tokens)
     inputs: AgentState = {
         "messages": [HumanMessage(content=query)],
         "user_id": user_id,
         "plan_mode": request.plan_mode,
+        "model_choice": request.model_choice,
     }
     config = {
         "configurable": {"thread_id": thread_id},
@@ -186,30 +211,99 @@ async def get_agent_stream(
     }
 
     try:
-        model_label = choose_react_model_label(inputs["messages"], request.plan_mode)
-        yield f"> 模型来源：自动路由（当前起始倾向：{model_label}）\n\n"
+        model_label = get_model_label(request.model_choice)
+        yield f"> 模型来源：{model_label}\n\n"
         yield f"🧠 [主循环] 已进入 ReAct 主循环。plan_mode={request.plan_mode}\n\n"
 
+        if should_force_pae(query, request.plan_mode):
+            yield "🧭 [硬触发] 当前请求满足计划执行条件，直接进入 PAE。\n\n"
+            final_result = None
+            async for line, result in stream_plan_and_execute(
+                query=query,
+                thread_id=thread_id,
+                user_id=user_id,
+                plan_mode=request.plan_mode,
+                model_choice=request.model_choice,
+                metadata_filters=request.metadata_filters,
+            ):
+                if line:
+                    yield f"{line}\n\n"
+                if result is not None:
+                    final_result = result
+            yield "\n"
+            if final_result:
+                yield final_result.get("final_answer", "")
+            if user_id:
+                asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))
+            return
+
         stream_had_content = False
-        async for event in agent.astream_events(inputs, config=config, version="v2"):
-            kind = event["event"]
+        event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-            if kind == "on_chat_model_stream":
-                chunk_content = event["data"]["chunk"].content
-                if chunk_content:
-                    stream_had_content = True
-                    yield chunk_content
+        async def _pump_events() -> None:
+            async for event in agent.astream_events(inputs, config=config, version="v2"):
+                await event_queue.put(event)
+            await event_queue.put(None)
 
-            elif kind == "on_tool_start":
-                tool_name = event["name"]
-                yield f"\n\n🛠️ [工具调用] 决定调用工具：【{tool_name}】...\n"
+        pump_task = asyncio.create_task(_pump_events())
+        event_stream_done = False
 
-            elif kind == "on_tool_end":
-                tool_name = event["name"]
-                if tool_name == "run_plan_and_execute":
-                    for line in drain_tool_trace():
-                        yield f"{line}\n"
-                yield f"\n✅ [工具完成] 工具【{tool_name}】执行完成，正在继续推理...\n\n"
+        try:
+            while not event_stream_done:
+                pending = []
+                event_task = asyncio.create_task(event_queue.get())
+                pending.append(event_task)
+                trace_task = None
+                if tool_trace_queue is not None:
+                    trace_task = asyncio.create_task(tool_trace_queue.get())
+                    pending.append(trace_task)
+
+                done, pending_tasks = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending_tasks:
+                    task.cancel()
+
+                if trace_task is not None and trace_task in done:
+                    line = trace_task.result()
+                    if line:
+                        yield f"{line}\n\n"
+                    continue
+
+                if event_task not in done:
+                    continue
+
+                event = event_task.result()
+                if event is None:
+                    event_stream_done = True
+                    break
+
+                kind = event["event"]
+
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if _should_suppress_stream_chunk(chunk):
+                        continue
+                    chunk_content = chunk.content
+                    if chunk_content:
+                        stream_had_content = True
+                        yield chunk_content
+
+                elif kind == "on_tool_start":
+                    tool_name = event["name"]
+                    if tool_name == "run_plan_and_execute":
+                        yield "\n\n🧭 [PAE调用] 主循环决定进入 Plan-and-Execute 子流程。\n\n"
+                    else:
+                        yield f"\n\n🛠️ [工具调用] 决定调用工具：【{tool_name}】...\n\n"
+
+                elif kind == "on_tool_end":
+                    tool_name = event["name"]
+                    if tool_name == "run_plan_and_execute":
+                        drain_tool_trace()
+                        yield "\n✅ [PAE完成] Plan-and-Execute 子流程执行完成，主循环继续决策。\n\n"
+                    else:
+                        yield f"\n✅ [工具完成] 工具【{tool_name}】执行完成，正在继续推理...\n\n"
+        finally:
+            if not pump_task.done():
+                pump_task.cancel()
 
         if stream_had_content and user_id:
             asyncio.ensure_future(_extract_and_save_memories(thread_id, user_id))

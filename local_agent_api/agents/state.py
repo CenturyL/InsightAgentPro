@@ -35,6 +35,7 @@ class OrchestratorState(TypedDict):
     user_id: str
     thread_id: str
     plan_mode: NotRequired[str]
+    model_choice: NotRequired[str]
     metadata_filters: NotRequired[dict[str, Any]]
     is_complex: bool
     planning_reason: NotRequired[str]

@@ -16,39 +16,27 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = Field(default=None, description="用户ID，用于长期记忆隔离；不传则跳过长期记忆")
     plan_mode: Optional[str] = Field(default=None, description="可选计划模式：auto、compare、extract、report、research、strict_plan")
     task_mode: Optional[str] = Field(default=None, description="旧字段兼容：将被映射为 plan_mode")
+    model_choice: Optional[str] = Field(default="local_qwen", description="手动选择模型：local_qwen、deepseek、minimax")
     metadata_filters: Optional[dict[str, Any]] = Field(default=None, description="可选元数据过滤条件，如 region、year、source_type")
 
 
-class RetrievalEvalRequest(BaseModel):
-    """检索评估和 baseline 对比接口的输入结构。"""
-    dataset_path: Optional[str] = Field(
-        default=None,
-        description="离线检索评估数据集路径，默认读取 local_agent_api/data/eval/retrieval_eval_dataset.jsonl",
-    )
-    top_k: int = Field(default=3, ge=1, le=20, description="计算 Precision@k / Recall@k 的 top-k")
-    candidate_k: int = Field(default=15, ge=1, le=100, description="候选召回数量")
-    strategy: str = Field(default="hybrid_rerank", description="检索策略：dense_only、dense_rerank、hybrid_only、hybrid_rerank")
+class RuntimeSkillAsset(BaseModel):
+    """前端可编辑的 Skill 文件。"""
+    filename: str = Field(..., description="skill 文件名，如 research.md")
+    content: str = Field(..., description="skill 文件内容")
 
 
-class GenerationEvalRequest(BaseModel):
-    """生成质量评估接口的输入结构。"""
-    dataset_path: Optional[str] = Field(
-        default=None,
-        description="离线生成评估数据集路径，默认读取 local_agent_api/data/eval/generation_eval_dataset.jsonl",
-    )
-    candidate_k: int = Field(default=15, ge=1, le=100, description="检索候选数量")
+class RuntimeAssetsResponse(BaseModel):
+    """运行时资产读取结果。"""
+    agents_md: str = Field(default="", description="persona/AGENTS.md 内容")
+    soul_md: str = Field(default="", description="persona/SOUL.md 内容")
+    memory_md: str = Field(default="", description="memory/MEMORY.md 内容")
+    skills: list[RuntimeSkillAsset] = Field(default_factory=list, description="skills 目录下的 markdown skills")
 
 
-class RebuildTestEnvRequest(BaseModel):
-    """测试环境重建参数，可选控制是否强制下载和自动评估。"""
-    force_download: bool = Field(default=False, description="是否强制重新下载公开测试文档")
-    run_retrieval_eval: bool = Field(default=True, description="是否在重建完成后自动跑一次检索评估")
-
-
-class SystemBenchmarkRequest(BaseModel):
-    """系统 benchmark 接口的输入结构。"""
-    retrieval_dataset_path: Optional[str] = Field(
-        default=None,
-        description="检索 benchmark 数据集路径，默认读取 local_agent_api/data/eval/retrieval_eval_dataset.jsonl",
-    )
-    candidate_k: int = Field(default=8, ge=1, le=100, description="检索候选数量")
+class RuntimeAssetsUpdateRequest(BaseModel):
+    """运行时资产更新请求。"""
+    agents_md: str = Field(default="", description="persona/AGENTS.md 新内容")
+    soul_md: str = Field(default="", description="persona/SOUL.md 新内容")
+    memory_md: str = Field(default="", description="memory/MEMORY.md 新内容")
+    skills: list[RuntimeSkillAsset] = Field(default_factory=list, description="需要保存的技能文件内容")

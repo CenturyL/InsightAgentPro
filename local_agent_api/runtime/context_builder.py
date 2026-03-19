@@ -9,6 +9,7 @@ from local_agent_api.runtime.memory_bridge import (
     search_long_term_memory_text,
     search_markdown_memory_text,
 )
+from local_agent_api.runtime.engine import classify_complexity, recommended_action
 from local_agent_api.runtime.prompt_manager import build_runtime_system_prompt
 from local_agent_api.runtime.skill_loader import LoadedSkill, select_skills
 
@@ -19,6 +20,8 @@ class RuntimeContext:
     skills: list[LoadedSkill]
     long_term_memories: list[str]
     markdown_memories: list[str]
+    complexity: str
+    recommended_action: str
 
 
 def build_runtime_context(
@@ -29,6 +32,8 @@ def build_runtime_context(
     encourage_pae: bool = True,
 ) -> RuntimeContext:
     """收集动态上下文并输出最终 system prompt。"""
+    complexity = classify_complexity(query, plan_mode)
+    action = recommended_action(query, plan_mode)
     skill_items = select_skills(query, plan_mode)
     long_term_memories = search_long_term_memory_text(user_id, query, k=3)
     markdown_memories = search_markdown_memory_text(query, k=2)
@@ -40,10 +45,14 @@ def build_runtime_context(
         memory_text=memory_text,
         available_tool_names=available_tool_names,
         encourage_pae=encourage_pae,
+        complexity=complexity,
+        recommended_action=action,
     )
     return RuntimeContext(
         system_prompt=system_prompt,
         skills=skill_items,
         long_term_memories=long_term_memories,
         markdown_memories=markdown_memories,
+        complexity=complexity,
+        recommended_action=action,
     )

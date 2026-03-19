@@ -3,7 +3,6 @@ from __future__ import annotations
 """对第一轮执行中证据不足或失败的步骤做补救重试。"""
 
 from local_agent_api.agents.state import OrchestratorState
-from local_agent_api.runtime.tool_registry import INTERNAL_TOOL_HANDLERS
 from local_agent_api.services.tool_context import set_tool_request_context, reset_tool_request_context
 
 
@@ -29,9 +28,12 @@ async def reflection_node(state: OrchestratorState) -> OrchestratorState:
         thread_id=state.get("thread_id", "default"),
         user_id=state.get("user_id", ""),
         plan_mode=state.get("plan_mode"),
+        model_choice=state.get("model_choice", "local_qwen"),
         metadata_filters=state.get("metadata_filters"),
+        in_pae=True,
     )
     try:
+        from local_agent_api.runtime.tool_registry import INTERNAL_TOOL_HANDLERS
         for result in state.get("step_results", []):
             if result["status"] == "completed":
                 updated_results.append(result)
