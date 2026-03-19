@@ -45,6 +45,12 @@ type CombinedPaeStep = {
   status: string;
 };
 
+type ParsedThinking = {
+  thought: string;
+  codeThought: string;
+  answer: string;
+};
+
 type UploadState = {
   filename: string;
   chunksInserted: number;
@@ -96,22 +102,63 @@ function renderMarkdown(content: string) {
   return { __html: marked.parse(content) as string };
 }
 
-function splitThinkingContent(content: string): { thought: string; answer: string } {
-  if (!content) return { thought: "", answer: "" };
+function uniqueTextBlocks(blocks: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const normalized = trimmed.replace(/\s+/g, " ");
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function splitThinkingContent(content: string): ParsedThinking {
+  if (!content) return { thought: "", codeThought: "", answer: "" };
   const thinkPattern = /<think>([\s\S]*?)<\/think>/g;
   const thoughts: string[] = [];
-  const answer = content.replace(thinkPattern, (_, value: string) => {
+  let answer = content.replace(thinkPattern, (_, value: string) => {
     const trimmed = value.trim();
     if (trimmed) thoughts.push(trimmed);
     return "";
   }).trim();
 
-  if (thoughts.length === 0) {
-    return { thought: "", answer: content };
+  const paeMarker = answer.indexOf("🧭 [计划模式]");
+  if (paeMarker > 0) {
+    const prefix = answer.slice(0, paeMarker).trim();
+    if (
+      prefix &&
+      [
+        "run_plan_and_execute",
+        "根据PAE规则",
+        "complexity=",
+        "我应该调用",
+        "让我调用",
+        "这是一个复杂任务",
+      ].some((marker) => prefix.includes(marker))
+    ) {
+      thoughts.push(prefix);
+      answer = answer.slice(paeMarker).trim();
+    }
   }
 
+  if (thoughts.length === 0) {
+    return { thought: "", codeThought: "", answer: content };
+  }
+
+  const dedupedThoughts = uniqueTextBlocks(thoughts);
+  const thoughtText = dedupedThoughts.join("\n\n---\n\n");
+  const codePattern = /```[\s\S]*?```/g;
+  const codeThoughtBlocks = uniqueTextBlocks(thoughtText.match(codePattern) ?? []);
+  const codeThought = codeThoughtBlocks.join("\n\n");
+  const thought = thoughtText.replace(codePattern, "").replace(/\n{3,}/g, "\n\n").trim();
+
   return {
-    thought: thoughts.join("\n\n---\n\n"),
+    thought,
+    codeThought,
     answer,
   };
 }
@@ -126,7 +173,7 @@ function createAssistantPlaceholder(): ChatMessage {
   };
 }
 
-function parsePaeTrace(traces: string[]): ParsedPaeTrace {
+function parsePaeTrace(traces: string[], content = ""): ParsedPaeTrace {
   const parsed: ParsedPaeTrace = {
     active: false,
     entered: false,
@@ -200,6 +247,23 @@ function parsePaeTrace(traces: string[]): ParsedPaeTrace {
     }
   }
 
+  if (content.includes("已进入 Plan-and-Execute 子流程")) {
+    parsed.active = true;
+    parsed.entered = true;
+  }
+  if (content.includes("已生成执行计划")) {
+    parsed.active = true;
+    parsed.planning = true;
+  }
+  if (content.includes("正在生成最终结果")) {
+    parsed.active = true;
+    parsed.generating = true;
+  }
+  if (content.includes("Plan-and-Execute 子流程执行完成")) {
+    parsed.active = true;
+    parsed.completed = true;
+  }
+
   if (parsed.planSteps.length > 0) {
     parsed.active = true;
     parsed.entered = true;
@@ -215,6 +279,20 @@ function parsePaeTrace(traces: string[]): ParsedPaeTrace {
   if (parsed.completed && parsed.planSteps.length > 0) {
     parsed.entered = true;
     parsed.planning = true;
+    parsed.reflecting = true;
+    if (parsed.executionSteps.length === 0) {
+      parsed.executionSteps = parsed.planSteps.map((step) => ({
+        stepId: step.stepId,
+        status: "completed",
+        goal: step.goal,
+      }));
+    }
+    if (parsed.reflectionSteps.length === 0) {
+      parsed.reflectionSteps = parsed.planSteps.map((step) => ({
+        stepId: step.stepId,
+        status: "completed",
+      }));
+    }
     parsed.generating = true;
   }
 
@@ -255,6 +333,7 @@ export default function App() {
   const [activeTraceMessageId, setActiveTraceMessageId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showTracePanel, setShowTracePanel] = useState(false);
+  const [expandedThoughtIds, setExpandedThoughtIds] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -267,7 +346,7 @@ export default function App() {
     [activeTraceMessageId, messages],
   );
   const activePaeTrace = useMemo(
-    () => parsePaeTrace(activeTraceMessage?.traces ?? []),
+    () => parsePaeTrace(activeTraceMessage?.traces ?? [], activeTraceMessage?.content ?? ""),
     [activeTraceMessage],
   );
   const combinedPaeSteps = useMemo(
@@ -318,6 +397,15 @@ export default function App() {
       setToastMessage("");
       toastTimerRef.current = null;
     }, 2200);
+  }
+
+  function setThoughtExpanded(messageId: string, expanded: boolean) {
+    setExpandedThoughtIds((prev) => {
+      const has = prev.includes(messageId);
+      if (expanded && !has) return [...prev, messageId];
+      if (!expanded && has) return prev.filter((id) => id !== messageId);
+      return prev;
+    });
   }
 
   async function loadRuntimeAssets() {
@@ -678,13 +766,15 @@ export default function App() {
               onClick={() => message.role === "assistant" && setActiveTraceMessageId(message.id)}
             >
               {(() => {
-                const parsedPae = message.role === "assistant" ? parsePaeTrace(message.traces) : null;
-                const { thought, answer } =
+                const parsedPae = message.role === "assistant" ? parsePaeTrace(message.traces, message.content || "") : null;
+                const { thought, codeThought, answer } =
                   message.role === "assistant"
                     ? splitThinkingContent(message.content || "")
-                    : { thought: "", answer: message.content || "" };
-                const showCollapsedThought = Boolean(thought && answer);
-                const bodyContent = answer || (thought ? "" : message.content || "处理中...");
+                    : { thought: "", codeThought: "", answer: message.content || "" };
+                const fullThought = [thought, codeThought].filter(Boolean).join("\n\n");
+                const showCollapsedThought = Boolean(fullThought && answer);
+                const thoughtExpanded = expandedThoughtIds.includes(message.id) || !showCollapsedThought;
+                const bodyContent = answer || (fullThought ? "" : message.content || "处理中...");
 
                 return (
                   <>
@@ -699,17 +789,31 @@ export default function App() {
                       {message.role === "assistant" && parsedPae?.active ? (
                         <div className="pae-badge">PAE</div>
                       ) : null}
-                      {message.role === "assistant" && thought ? (
-                        <details className="thought-block" open={!showCollapsedThought}>
-                          <summary>
-                            <span className="thought-summary-collapsed">▸ 思考过程（展开）</span>
-                            <span className="thought-summary-open">▾ 思考过程（折叠）</span>
-                          </summary>
-                          <div
-                            className="thought-body"
-                            dangerouslySetInnerHTML={renderMarkdown(thought)}
-                          />
-                        </details>
+                      {message.role === "assistant" && fullThought ? (
+                        <div className="thought-block">
+                          <button
+                            type="button"
+                            className="thought-toggle"
+                            onClick={() => setThoughtExpanded(message.id, !thoughtExpanded)}
+                          >
+                            {thoughtExpanded ? "▾ 思考过程（折叠）" : "▸ 思考过程（展开）"}
+                          </button>
+                          {thoughtExpanded ? (
+                            <div className="thought-body-wrap">
+                              <div
+                                className="thought-body"
+                                dangerouslySetInnerHTML={renderMarkdown(fullThought)}
+                              />
+                              <button
+                                type="button"
+                                className="thought-toggle thought-toggle-bottom"
+                                onClick={() => setThoughtExpanded(message.id, false)}
+                              >
+                                ▴ 收起思考过程
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       ) : null}
                       <div
                         className="message-body"

@@ -452,39 +452,30 @@ button {
   overflow: hidden;
 }
 
-.thought-block summary {
+.thought-toggle {
+  width: 100%;
   cursor: pointer;
-  list-style: none;
+  text-align: left;
   padding: 10px 12px;
+  background: transparent;
+  border: none;
   color: #708099;
   font-size: 0.78rem;
   font-weight: 600;
 }
 
-.thought-block summary span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.thought-toggle-bottom {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(84, 99, 125, 0.1);
+  font-size: 0.76rem;
 }
 
-.thought-summary-open {
-  display: none;
-}
-
-.thought-block[open] .thought-summary-collapsed {
-  display: none;
-}
-
-.thought-block[open] .thought-summary-open {
-  display: inline-flex;
-}
-
-.thought-block summary::-webkit-details-marker {
-  display: none;
+.thought-body-wrap {
+  padding: 0 12px 12px;
 }
 
 .thought-body {
-  padding: 0 12px 12px;
   color: #7b879a;
   font-size: 0.84rem;
   line-height: 1.6;
